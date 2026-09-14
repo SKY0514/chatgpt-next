@@ -6,29 +6,28 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import FormCard from "./FormCard";
 import Submit from "./Submit";
-import { SignUpSchema } from "@/schemas/auth";
+import { LoginSchema } from "@/schemas/auth";
 import FormMessage from "./FormMessage";
 import { useActionState, useEffect, useTransition } from "react";
-import { signup } from "@/actions/signup";
 import toast from "react-hot-toast";
+import { login } from "@/actions/login";
 
-type TSignUpForm = z.infer<typeof SignUpSchema>;
+type TLoginForm = z.infer<typeof LoginSchema>;
 
-const SignUpForm = () => {
-  const [error, action, isPending] = useActionState(signup, undefined);
+const LoginForm = () => {
+  const [error, action, isPending] = useActionState(login, undefined);
   const [, startTransition] = useTransition();
   const {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<TSignUpForm>({
-    resolver: zodResolver(SignUpSchema),
+  } = useForm<TLoginForm>({
+    resolver: zodResolver(LoginSchema),
     mode: "onChange",
   });
 
-  const onSubmit = (data: TSignUpForm) => {
+  const onSubmit = (data: TLoginForm) => {
     const formData = new FormData();
-    formData.append("name", data.name);
     formData.append("email", data.email);
     formData.append("password", data.password);
 
@@ -41,27 +40,18 @@ const SignUpForm = () => {
 
   useEffect(() => {
     if (error?.errorMessage) {
+      console.log("error?.errorMessage", error?.errorMessage);
+
       toast.error(error.errorMessage);
     }
   }, [error]);
 
   return (
     <FormCard
-      title="회원가입"
-      footer={{ label: "이미 계정이 있으신가요?", href: "/login" }}
+      title="로그인"
+      footer={{ label: "아직 계정이 없으신가요?", href: "/signup" }}
     >
       <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
-        {/* 이름 */}
-        <div className="space-y-1">
-          <Label htmlFor="name">이름</Label>
-          <Input
-            id="name"
-            placeholder="이름을 입력해주세요."
-            error={!!errors.name}
-            {...register("name")}
-          />
-          {errors.name && <FormMessage message={errors.name.message!} />}
-        </div>
         {/* 이메일 */}
         <div className="space-y-1">
           <Label htmlFor="email">이메일</Label>
@@ -88,11 +78,11 @@ const SignUpForm = () => {
           )}
         </div>
         <Submit className="w-full" disabled={isPending}>
-          가입하기
+          로그인
         </Submit>
       </form>
     </FormCard>
   );
 };
 
-export default SignUpForm;
+export default LoginForm;
