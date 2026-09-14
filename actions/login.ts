@@ -48,5 +48,10 @@ export const login = async (_: any, formData: FormData) => {
     return { errorMessage: "문제가 발생했습니다." };
   }
 
-  redirect("/");
+  const from = formData.get("from");
+  // "/"로 시작하는 내부 경로만 허용 (open redirect 방지)
+  const isSafeRedirect =
+    typeof from === "string" && from.startsWith("/") && !from.startsWith("//");
+
+  redirect(isSafeRedirect ? from : "/");
 };

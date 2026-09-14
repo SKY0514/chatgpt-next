@@ -14,7 +14,7 @@ import { login } from "@/actions/login";
 
 type TLoginForm = z.infer<typeof LoginSchema>;
 
-const LoginForm = () => {
+const LoginForm = ({ from }: { from?: string }) => {
   const [error, action, isPending] = useActionState(login, undefined);
   const [, startTransition] = useTransition();
   const {
@@ -30,6 +30,7 @@ const LoginForm = () => {
     const formData = new FormData();
     formData.append("email", data.email);
     formData.append("password", data.password);
+    if (from) formData.append("from", from);
 
     startTransition(() => {
       action(formData);
