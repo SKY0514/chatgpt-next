@@ -32,7 +32,7 @@ export const verify = async (session: string | undefined = "") => {
 };
 
 export const createSession = async (payload: SessionPayload) => {
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
   const session = await encrypt(payload);
   const cookieStore = await cookies();
 
