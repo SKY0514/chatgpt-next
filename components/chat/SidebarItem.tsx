@@ -11,6 +11,7 @@ import {
 import { Ellipsis, Pencil, Trash } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { cn } from "cn";
+import { useSheetStore } from "@/stores/sheet";
 
 type Props = {
   item: { id: string; label: string; icon: ReactNode; href: string };
@@ -19,6 +20,7 @@ const SidebarItem = ({ item }: Props) => {
   const { id, label, icon, href } = item;
   const pathName = usePathname();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const setOpen = useSheetStore((state) => state.setOpen);
 
   return (
     <Link
@@ -29,6 +31,7 @@ const SidebarItem = ({ item }: Props) => {
           ? "text-white bg-white/10"
           : "text-zinc-400",
       )}
+      onClick={() => setOpen(false)}
     >
       {/* label 영역 */}
       <div className="flex items-center gap-2">
