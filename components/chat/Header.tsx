@@ -3,7 +3,7 @@ import ModelSelect from "./ModelSelect";
 
 const Header = () => {
   return (
-    <header className="flex items-center p-2">
+    <header className="flex items-center p-2 sticky top-0 bg-white z-10">
       {/* 모바일 메뉴 영역 */}
       <MobileMenu />
       {/* 모델 선택 영역 */}
