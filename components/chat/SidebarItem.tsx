@@ -97,13 +97,13 @@ const SidebarItem = ({ item }: Props) => {
     try {
       await deleteConversation(id);
 
-      toast.success("삭제에 성공했습니다.");
-
-      closeModal();
-
       if (conversationId === id) {
         router.replace(BASE_URL);
       }
+
+      toast.success("삭제에 성공했습니다.");
+
+      closeModal();
     } catch (error) {
       console.error("error:", error);
       toast.error("삭제에 실패했습니다.");
