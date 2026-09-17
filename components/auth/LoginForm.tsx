@@ -58,6 +58,7 @@ const LoginForm = ({ from }: { from?: string }) => {
           <Label htmlFor="email">이메일</Label>
           <Input
             id="email"
+            autoComplete="username"
             placeholder="example@example.com"
             error={!!errors.email}
             {...register("email")}
@@ -70,6 +71,7 @@ const LoginForm = ({ from }: { from?: string }) => {
           <Input
             id="password"
             type="password"
+            autoComplete="current-password"
             placeholder="*********"
             error={!!errors.password}
             {...register("password")}

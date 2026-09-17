@@ -67,6 +67,7 @@ const SignUpForm = () => {
           <Label htmlFor="email">이메일</Label>
           <Input
             id="email"
+            autoComplete="email"
             placeholder="example@example.com"
             error={!!errors.email}
             {...register("email")}
@@ -79,6 +80,7 @@ const SignUpForm = () => {
           <Input
             id="password"
             type="password"
+            autoComplete="new-password"
             placeholder="*********"
             error={!!errors.password}
             {...register("password")}
