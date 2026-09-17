@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Loader2 } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "../ui/button";
 import AutoResizingTextarea from "./AutoResizingTextarea";
@@ -10,7 +10,10 @@ import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { useModelStore } from "@/stores/model";
 import { useParams, useRouter } from "next/navigation";
-import { addMessage, createConversation } from "@/actions/conversations";
+import {
+  addMessage,
+  createConversationWithMessage,
+} from "@/actions/conversations";
 import type { UIMessage } from "ai";
 import { CHAT_ROUTES } from "@/constants/routes";
 import { useUserStore } from "@/stores/user";
@@ -32,6 +35,7 @@ const Chat = ({ initialMessages }: Props) => {
 
   const [inputValue, setInputValue] = useState("");
   const [isMultiline, setIsMultiline] = useState(false);
+  const [isCreatingConversation, setIsCreatingConversation] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const isFirstRenderRef = useRef(true);
@@ -69,7 +73,6 @@ const Chat = ({ initialMessages }: Props) => {
   });
 
   // 새 대화방으로 이동한 직후, 답변을 못 받은 마지막 유저 메세지가 있으면 이어서 답변받기
-  // (StrictMode에서 이 effect가 두 번 실행돼도 한 번만 트리거되도록 ref로 가드)
   useEffect(() => {
     if (hasAutoRegeneratedRef.current) return;
 
@@ -88,14 +91,15 @@ const Chat = ({ initialMessages }: Props) => {
     setInputValue("");
 
     if (!id) {
+      setIsCreatingConversation(true);
       try {
-        const conversation = await createConversation(text);
-        await addMessage(conversation.id, text, "user");
+        const conversation = await createConversationWithMessage(text);
         router.push(`${CHAT_ROUTES.CONVERSATIONS}/${conversation.id}`);
       } catch (error) {
         console.error("error:", error);
         toast.error("대화 생성에 실패하였습니다.");
         setInputValue(text);
+        setIsCreatingConversation(false);
       }
       return;
     }
@@ -147,6 +151,7 @@ const Chat = ({ initialMessages }: Props) => {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onMultilineChange={setIsMultiline}
+            disabled={isCreatingConversation}
             onKeyDown={(e) => {
               if (
                 e.key === "Enter" &&
@@ -158,8 +163,12 @@ const Chat = ({ initialMessages }: Props) => {
               }
             }}
           />
-          <Button type="submit" size="icon">
-            <ArrowUp />
+          <Button type="submit" size="icon" disabled={isCreatingConversation}>
+            {isCreatingConversation ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <ArrowUp />
+            )}
           </Button>
         </form>
       </div>
