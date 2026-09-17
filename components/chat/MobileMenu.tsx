@@ -4,8 +4,9 @@ import { Menu } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "../ui/sheet";
 import Sidebar from "./Sidebar";
 import { useSheetStore } from "@/stores/sheet";
+import { ReactNode } from "react";
 
-const MobileMenu = () => {
+const MobileMenu = ({ children }: { children: ReactNode }) => {
   const open = useSheetStore((state) => state.open);
   const setOpen = useSheetStore((state) => state.setOpen);
 
@@ -16,7 +17,7 @@ const MobileMenu = () => {
           <Menu />
         </SheetTrigger>
         <SheetContent side="left" className="p-0">
-          <Sidebar />
+          {children}
         </SheetContent>
       </Sheet>
     </div>
