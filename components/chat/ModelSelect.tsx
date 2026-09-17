@@ -8,9 +8,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-import { cn } from "cn";
 
-const AI_MODEL = ["gpt-3.5-turbo", "gpt-4", "gtp-4o"];
+const AI_MODEL = ["gpt-4.1-nano", "gpt-5-nano", "gpt-4o-mini"];
 
 const ModelSelect = () => {
   const storeModel = useModelStore((state) => state.model);
