@@ -42,7 +42,8 @@ export const login = async (_: any, formData: FormData) => {
     }
 
     // 세션 생성
-    await createSession({ id, name });
+    const rememberMe = formData.get("rememberMe") === "true";
+    await createSession({ id, name }, rememberMe);
   } catch (error) {
     console.error("error", error);
     return { errorMessage: "문제가 발생했습니다." };

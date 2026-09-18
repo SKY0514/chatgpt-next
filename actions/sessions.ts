@@ -11,11 +11,14 @@ type SessionPayload = {
   name: string;
 };
 
-export const encrypt = async (payload: SessionPayload) => {
+export const encrypt = async (
+  payload: SessionPayload,
+  expiresIn: string = "30m",
+) => {
   return new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("30m")
+    .setExpirationTime(expiresIn)
     .sign(encodedKey);
 };
 
@@ -31,9 +34,13 @@ export const verify = async (session: string | undefined = "") => {
   }
 };
 
-export const createSession = async (payload: SessionPayload) => {
-  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
-  const session = await encrypt(payload);
+export const createSession = async (
+  payload: SessionPayload,
+  rememberMe: boolean = false,
+) => {
+  const maxAgeMs = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 30 * 60 * 1000;
+  const expiresAt = new Date(Date.now() + maxAgeMs);
+  const session = await encrypt(payload, rememberMe ? "30d" : "30m");
   const cookieStore = await cookies();
 
   cookieStore.set("session", session, {
