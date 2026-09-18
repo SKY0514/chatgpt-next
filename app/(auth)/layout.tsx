@@ -3,9 +3,11 @@ import { ReactNode } from "react";
 
 const AuthLayout = ({ children }: { children: ReactNode }) => {
   return (
-    <div className="h-dvh bg-[#FAF8FF] flex flex-col">
+    <div className="flex h-dvh flex-col overflow-x-hidden bg-[#FAF8FF]">
       <Header />
-      <div className="flex flex-1 justify-center items-center">{children}</div>
+      <div className="flex flex-1 items-center justify-center px-4">
+        {children}
+      </div>
     </div>
   );
 };
