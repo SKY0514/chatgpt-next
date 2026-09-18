@@ -48,7 +48,11 @@ const SignUpForm = () => {
   return (
     <FormCard
       title="회원가입"
-      footer={{ label: "이미 계정이 있으신가요?", href: "/login" }}
+      footer={{
+        label: "이미 계정이 있으신가요?",
+        linkLabel: "로그인",
+        href: "/login",
+      }}
     >
       <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
         {/* 이름 */}
