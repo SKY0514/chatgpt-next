@@ -32,7 +32,7 @@ const FormCard = ({ title, subtitle, footer, children }: Props) => {
               className="size-9"
             />
           </div>
-          <p className="text-[22px] font-bold tracking-[-0.55px] text-foreground">
+          <p className="text-[22px] font-extrabold tracking-[-0.55px] text-foreground">
             {title}
           </p>
           {subtitle && (
