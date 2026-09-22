@@ -114,64 +114,71 @@ const Chat = ({ initialMessages }: Props) => {
     isFirstRenderRef.current = false;
   }, [messages]);
 
+  const isEmpty = !id && messages.length === 0;
+
   return (
     <div className="flex flex-col w-[80%] h-full mx-auto">
       {/* 채팅 영역 */}
-      <div className="flex-1 py-10">
-        {!id && messages.length === 0 ? (
-          <Empty />
-        ) : (
-          messages.map((message) => (
-            <Message
-              key={message.id}
-              name={storeUser.name}
-              content={message.parts
-                .filter((part) => part.type === "text")
-                .map((part) => part.text)
-                .join("")}
-              role={message.role as "user" | "assistant"}
-            />
-          ))
-        )}
-      </div>
+      {isEmpty ? (
+        <Empty
+          inputValue={inputValue}
+          onInputChange={setInputValue}
+          onSubmit={handleSubmit}
+          disabled={isCreatingConversation}
+        />
+      ) : (
+        messages.map((message) => (
+          <Message
+            key={message.id}
+            name={storeUser.name}
+            content={message.parts
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("")}
+            role={message.role as "user" | "assistant"}
+          />
+        ))
+      )}
 
       {/* input 영역 */}
-      <div className="pb-5 sticky bottom-0 bg-white">
-        <form
-          className={cn(
-            "flex gap-x-4 border px-2 py-[9px] rounded-xl",
-            isMultiline ? "items-end flex-col" : "items-center",
-          )}
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSubmit();
-          }}
-        >
-          <AutoResizingTextarea
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onMultilineChange={setIsMultiline}
-            disabled={isCreatingConversation}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.nativeEvent.isComposing
-              ) {
-                e.preventDefault();
-                handleSubmit();
-              }
-            }}
-          />
-          <Button type="submit" size="icon" disabled={isCreatingConversation}>
-            {isCreatingConversation ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <ArrowUp />
+      {!isEmpty && (
+        <div className="pb-5 sticky bottom-0 bg-white">
+          <form
+            className={cn(
+              "flex gap-x-4 border px-2 py-[9px] rounded-xl",
+              isMultiline ? "items-end flex-col" : "items-center",
             )}
-          </Button>
-        </form>
-      </div>
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmit();
+            }}
+          >
+            <AutoResizingTextarea
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onMultilineChange={setIsMultiline}
+              disabled={isCreatingConversation}
+              onKeyDown={(e) => {
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing
+                ) {
+                  e.preventDefault();
+                  handleSubmit();
+                }
+              }}
+            />
+            <Button type="submit" size="icon" disabled={isCreatingConversation}>
+              {isCreatingConversation ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <ArrowUp />
+              )}
+            </Button>
+          </form>
+        </div>
+      )}
       <div ref={scrollRef} />
     </div>
   );

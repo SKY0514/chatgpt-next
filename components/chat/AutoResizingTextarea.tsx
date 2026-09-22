@@ -1,6 +1,7 @@
 "use client";
 import { TextareaHTMLAttributes, useEffect, useRef } from "react";
 import { Textarea } from "../ui/textarea";
+import { cn } from "cn";
 
 type AutoResizingTextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
   onMultilineChange?: (isMultiline: boolean) => void;
@@ -9,6 +10,7 @@ type AutoResizingTextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & {
 const AutoResizingTextarea = ({
   value,
   onMultilineChange,
+  className,
   ...rest
 }: AutoResizingTextareaProps) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -29,7 +31,10 @@ const AutoResizingTextarea = ({
     <Textarea
       ref={textareaRef}
       value={value}
-      className="min-h-11 max-h-50 flex-1 resize-none border-0 !text-base focus-visible:ring-0"
+      className={cn(
+        "min-h-11 max-h-50 flex-1 resize-none border-0 !text-base focus-visible:ring-0",
+        className,
+      )}
       {...rest}
     />
   );
