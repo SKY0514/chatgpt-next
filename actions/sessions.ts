@@ -9,6 +9,7 @@ const encodedKey = new TextEncoder().encode(secretKey);
 type SessionPayload = {
   id: string;
   name: string;
+  email: string;
 };
 
 export const encrypt = async (
@@ -30,6 +31,7 @@ export const verify = async (session: string | undefined = "") => {
 
     return payload;
   } catch (error) {
+    console.error("error:", error);
     console.log("토큰 검증에 실패하였습니다.");
   }
 };
