@@ -1,9 +1,5 @@
 "use client";
 
-import { ArrowUp, Loader2 } from "lucide-react";
-import { cn } from "cn";
-import { Button } from "../ui/button";
-import AutoResizingTextarea from "./AutoResizingTextarea";
 import Empty from "./Empty";
 import Message from "./Message";
 import { useEffect, useRef, useState } from "react";
@@ -13,14 +9,18 @@ import { useParams, useRouter } from "next/navigation";
 import {
   addMessage,
   createConversationWithMessage,
+  updateLastAssistantMessage,
 } from "@/actions/conversations";
 import type { UIMessage } from "ai";
 import { CHAT_ROUTES } from "@/constants/routes";
 import { useUserStore } from "@/stores/user";
 import toast from "react-hot-toast";
+import { ChatUIMessage } from "@/types/chat";
+import MessageComposer from "./MessageComposer";
+import { ArrowDown } from "lucide-react";
 
 type Props = {
-  initialMessages?: UIMessage[];
+  initialMessages?: ChatUIMessage[];
 };
 
 const getTextFromMessage = (message: UIMessage) =>
@@ -34,28 +34,35 @@ const Chat = ({ initialMessages }: Props) => {
   const router = useRouter();
 
   const [inputValue, setInputValue] = useState("");
-  const [isMultiline, setIsMultiline] = useState(false);
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const isFirstRenderRef = useRef(true);
   const isContinuingPendingReplyRef = useRef(false);
+  const isRegeneratingRef = useRef(false);
   const hasAutoRegeneratedRef = useRef(false);
 
   const storeModel = useModelStore((state) => state.model);
   const storeUser = useUserStore((state) => state.user);
 
-  const { messages, sendMessage, regenerate } = useChat({
+  const { messages, sendMessage, regenerate, status } = useChat<ChatUIMessage>({
     messages: initialMessages,
     onFinish: async ({ message, messages: finishedMessages }) => {
       if (!id) return;
 
       const assistantContent = getTextFromMessage(message);
 
+      if (isRegeneratingRef.current) {
+        isRegeneratingRef.current = false;
+        await updateLastAssistantMessage(id, assistantContent, storeModel);
+        return;
+      }
+
       if (isContinuingPendingReplyRef.current) {
         // 이동 전에 사용자 메시지는 이미 저장해뒀으니 답변만 저장
         isContinuingPendingReplyRef.current = false;
-        await addMessage(id, assistantContent, "assistant");
+        await addMessage(id, assistantContent, "assistant", storeModel);
         return;
       }
 
@@ -68,28 +75,23 @@ const Chat = ({ initialMessages }: Props) => {
         : "";
 
       await addMessage(id, userContent, "user");
-      await addMessage(id, assistantContent, "assistant");
+      await addMessage(id, assistantContent, "assistant", storeModel);
     },
   });
 
-  // 새 대화방으로 이동한 직후, 답변을 못 받은 마지막 유저 메세지가 있으면 이어서 답변받기
-  useEffect(() => {
-    if (hasAutoRegeneratedRef.current) return;
+  const isBusy =
+    isCreatingConversation || status === "submitted" || status === "streaming";
 
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.role === "user") {
-      hasAutoRegeneratedRef.current = true;
-      isContinuingPendingReplyRef.current = true;
-      regenerate({ body: { model: storeModel } });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const lastAssistantMessage = [...messages]
+    .reverse()
+    .find((m) => m.role === "assistant");
 
   const handleSubmit = async () => {
     const text = inputValue;
     if (!text.trim()) return;
     setInputValue("");
 
+    // 새로운 대화 일때,
     if (!id) {
       setIsCreatingConversation(true);
       try {
@@ -107,6 +109,35 @@ const Chat = ({ initialMessages }: Props) => {
     sendMessage({ text }, { body: { model: storeModel } });
   };
 
+  const isEmpty = !id && messages.length === 0;
+
+  const assistantRegenerate = () => {
+    if (!lastAssistantMessage) return;
+    isRegeneratingRef.current = true;
+    regenerate({
+      messageId: lastAssistantMessage.id,
+      body: { model: storeModel },
+    });
+  };
+
+  const onCopy = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+    toast.success("복사되었습니다");
+  };
+
+  // 새 대화방으로 이동한 직후, 답변을 못 받은 마지막 유저 메세지가 있으면 이어서 답변받기
+  useEffect(() => {
+    if (hasAutoRegeneratedRef.current) return;
+
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.role === "user") {
+      hasAutoRegeneratedRef.current = true;
+      isContinuingPendingReplyRef.current = true;
+      regenerate({ body: { model: storeModel } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     scrollRef.current?.scrollIntoView({
       behavior: isFirstRenderRef.current ? "auto" : "smooth",
@@ -114,11 +145,25 @@ const Chat = ({ initialMessages }: Props) => {
     isFirstRenderRef.current = false;
   }, [messages]);
 
-  const isEmpty = !id && messages.length === 0;
+  useEffect(() => {
+    const scrollContainer = scrollRef.current?.closest("#home-layout");
+    if (!scrollContainer) return;
+
+    const handleScroll = () => {
+      const distanceFromBottom =
+        scrollContainer.scrollHeight -
+        scrollContainer.scrollTop -
+        scrollContainer.clientHeight;
+      setShowScrollToBottom(distanceFromBottom > 150);
+    };
+
+    scrollContainer.addEventListener("scroll", handleScroll);
+    handleScroll();
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
+  }, []);
 
   return (
-    <div className="flex flex-col w-[80%] h-full mx-auto">
-      {/* 채팅 영역 */}
+    <div className="flex flex-col w-[80%] mx-auto flex-1">
       {isEmpty ? (
         <Empty
           inputValue={inputValue}
@@ -127,59 +172,65 @@ const Chat = ({ initialMessages }: Props) => {
           disabled={isCreatingConversation}
         />
       ) : (
-        messages.map((message) => (
-          <Message
-            key={message.id}
-            name={storeUser.name}
-            content={message.parts
-              .filter((part) => part.type === "text")
-              .map((part) => part.text)
-              .join("")}
-            role={message.role as "user" | "assistant"}
-          />
-        ))
-      )}
+        <>
+          {/* 채팅 영역 */}
+          <div className="w-full min-h-0 pt-8 pb-30">
+            <div className="space-y-7">
+              {messages.map((message) => {
+                const isLast = message.id === messages[messages.length - 1]?.id;
 
-      {/* input 영역 */}
-      {!isEmpty && (
-        <div className="pb-5 sticky bottom-0 bg-white">
-          <form
-            className={cn(
-              "flex gap-x-4 border px-2 py-[9px] rounded-xl",
-              isMultiline ? "items-end flex-col" : "items-center",
-            )}
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSubmit();
-            }}
-          >
-            <AutoResizingTextarea
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onMultilineChange={setIsMultiline}
-              disabled={isCreatingConversation}
-              onKeyDown={(e) => {
-                if (
-                  e.key === "Enter" &&
-                  !e.shiftKey &&
-                  !e.nativeEvent.isComposing
-                ) {
-                  e.preventDefault();
-                  handleSubmit();
+                return (
+                  <Message
+                    key={message.id}
+                    name={storeUser.name}
+                    content={getTextFromMessage(message)}
+                    role={message.role as "user" | "assistant"}
+                    model={message.metadata?.model}
+                    createdAt={message.metadata?.createdAt}
+                    isLastAssistant={message.id === lastAssistantMessage?.id}
+                    isLoading={
+                      isLast &&
+                      message.role === "assistant" &&
+                      getTextFromMessage(message) === "" &&
+                      (status === "submitted" || status === "streaming")
+                    }
+                    handleRegenerateButton={assistantRegenerate}
+                    handleCopyButton={onCopy}
+                  />
+                );
+              })}
+            </div>
+            <div ref={scrollRef} />
+          </div>
+
+          {/* input 영역 */}
+          <div className="sticky bottom-4 mt-auto">
+            {/* 블러 배경 레이어 - 폼과 분리된 별도 요소 */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 -bottom-4 backdrop-blur-xs [linear-gradient(to_bottom,transparent,black_10%)]" />
+
+            {showScrollToBottom && (
+              <button
+                type="button"
+                onClick={() =>
+                  scrollRef.current?.scrollIntoView({ behavior: "smooth" })
                 }
-              }}
-            />
-            <Button type="submit" size="icon" disabled={isCreatingConversation}>
-              {isCreatingConversation ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <ArrowUp />
-              )}
-            </Button>
-          </form>
-        </div>
+                className="absolute left-1/2 -top-12 -translate-x-1/2 flex size-9 items-center justify-center rounded-full border border-[#e2e8f0] bg-white text-[#64748b] shadow-md hover:bg-[#f8fafc] animate-bounce"
+              >
+                <ArrowDown className="size-4" />
+              </button>
+            )}
+
+            <div className="relative">
+              <MessageComposer
+                value={inputValue}
+                onChange={setInputValue}
+                onSubmit={handleSubmit}
+                disabled={isBusy}
+              />
+            </div>
+          </div>
+        </>
       )}
-      <div ref={scrollRef} />
     </div>
   );
 };

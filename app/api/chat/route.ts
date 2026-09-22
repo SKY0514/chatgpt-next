@@ -1,5 +1,7 @@
 import { streamText, UIMessage, convertToModelMessages } from "ai";
 import { openai } from "@ai-sdk/openai";
+import type { ChatMessageMetadata } from "@/types/chat";
+import { AI_MODEL } from "@/constants/chat";
 
 export async function POST(req: Request) {
   const {
@@ -7,13 +9,20 @@ export async function POST(req: Request) {
     model,
   }: {
     messages: UIMessage[];
-    model: "gpt-4.1-nano" | "gpt-5-nano" | "gpt-4o-mini";
+    model: (typeof AI_MODEL)[number]["value"];
   } = await req.json();
 
+  const selectedModel = model || "gpt-4.1-nano";
+
   const result = streamText({
-    model: openai(model || "gpt-4.1-nano"),
+    model: openai(selectedModel),
     messages: await convertToModelMessages(messages),
   });
 
-  return result.toUIMessageStreamResponse();
+  return result.toUIMessageStreamResponse<UIMessage<ChatMessageMetadata>>({
+    messageMetadata: () => ({
+      model: selectedModel,
+      createdAt: new Date().toISOString(),
+    }),
+  });
 }

@@ -6,17 +6,46 @@ import db from "@/db";
 import { revalidatePath } from "next/cache";
 import { BASE_URL, CHAT_ROUTES } from "@/constants/routes";
 import { eq } from "drizzle-orm";
+import { getConversationById } from "@/data/conversation";
+
+export const getConversation = async (id: string) => {
+  return getConversationById(id);
+};
 
 export const addMessage = async (
   conversationId: string,
   content: string,
   role: "user" | "assistant",
+  model?: string,
 ) => {
   await db.insert(message).values({
     conversationId,
     content,
     role,
+    model: role === "assistant" ? model : undefined,
   });
+
+  revalidatePath(`${CHAT_ROUTES.CONVERSATIONS}/${conversationId}`);
+};
+
+// 대화방의 가장 최근 assistant 메시지를 새 내용으로 덮어씁니다 ("다시 생성" 용도).
+export const updateLastAssistantMessage = async (
+  conversationId: string,
+  content: string,
+  model?: string,
+) => {
+  const [latest] = await db.query.message.findMany({
+    where: { conversationId, role: "assistant" },
+    orderBy: (message, { desc }) => [desc(message.createdAt)],
+    limit: 1,
+  });
+
+  if (!latest) return;
+
+  await db
+    .update(message)
+    .set({ content, model, updatedAt: new Date() })
+    .where(eq(message.id, latest.id));
 
   revalidatePath(`${CHAT_ROUTES.CONVERSATIONS}/${conversationId}`);
 };

@@ -25,6 +25,7 @@ export const message = pgTable("message", {
   id: uuid("id").defaultRandom().notNull().primaryKey(),
   content: text("content"),
   role: text("role").$type<"user" | "assistant">(),
+  model: text("model"),
   conversationId: uuid("conversationId")
     .references(() => conversation.id, { onDelete: "cascade" })
     .notNull(),
