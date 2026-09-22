@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import { Ellipsis, Pencil, Trash } from "lucide-react";
+import { EllipsisVertical, Pencil, Trash } from "lucide-react";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { cn } from "cn";
 import { useSheetStore } from "@/stores/sheet";
@@ -30,10 +30,10 @@ import ModalFooter from "../modal/ModalFooter";
 import { BASE_URL } from "@/constants/routes";
 
 type Props = {
-  item: { id: string; label: string; icon: ReactNode; href: string };
+  item: { id: string; label: string; href: string };
 };
 const SidebarItem = ({ item }: Props) => {
-  const { id, label, icon, href } = item;
+  const { id, label, href } = item;
   const pathName = usePathname();
   const editInputRef = useRef<HTMLInputElement>(null);
   const { id: conversationId } = useParams<{ id: string }>();
@@ -110,24 +110,40 @@ const SidebarItem = ({ item }: Props) => {
     }
   };
 
+  const isActive = pathName === href;
+
   return (
     <Link
       href={href}
       className={cn(
-        "flex items-center justify-between text-sm p-3 group hover:text-white hover:bg-white/10 rounded-lg",
-        isMenuOpen || pathName === href
-          ? "text-white bg-white/10"
-          : "text-zinc-400",
+        "group relative flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-2 text-[13px] min-h-10",
+        isActive
+          ? "bg-[#e2e8f0] text-[#0f172a]"
+          : "text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0f172a]",
       )}
       onClick={() => setOpen(false)}
     >
+      {isActive && (
+        <span className="absolute top-2 bottom-2 left-0 w-1 rounded-r-full bg-[#6366f1]" />
+      )}
       {/* label 영역 */}
-      <div className="flex items-center gap-2">
-        {icon}
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <img
+          src={
+            isActive
+              ? "/icon-active-conversation.svg"
+              : "/icon-Inactive-conversation.svg"
+          }
+          className="size-3.75"
+          alt={
+            isActive ? "active conversation icon" : "inactive conversation icon"
+          }
+        />
+
         {isEditMode ? (
           <input
             ref={editInputRef}
-            className="bg-transparent border border-zinc-400 rounded-lg px-2 py-1"
+            className="rounded-lg border border-zinc-400 bg-transparent px-2 py-1 text-[13px]"
             value={editInputValue}
             onChange={handleChangeEditInputValue}
             onClick={(e: MouseEvent) => {
@@ -138,41 +154,43 @@ const SidebarItem = ({ item }: Props) => {
             onKeyDown={handleKeydown}
           />
         ) : (
-          <div className="w-45 truncate">{label}</div>
+          <div className="min-w-0 flex-1 truncate">{label}</div>
         )}
       </div>
 
       {/* 드롭다운 영역 */}
 
-      {id !== "new" && (
-        <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-          <DropdownMenuTrigger
-            render={<div />}
-            nativeButton={false}
-            onClick={(e: MouseEvent) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-          >
-            <Ellipsis
-              className={cn(
-                "group-hover:block text-gray-400 hover:text-white",
-                isMenuOpen ? "block text-white" : "md:hidden text-gray-400",
-              )}
-            />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuItem className="gap-2" onClick={handleClickEdit}>
-              <Pencil size={18} />
-              Edit
-            </DropdownMenuItem>
-            <DropdownMenuItem className="gap-2" onClick={handleClickDelete}>
-              <Trash size={18} />
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+      <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+        <DropdownMenuTrigger
+          render={<div />}
+          nativeButton={false}
+          onClick={(e: MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className={cn(
+            "size-6 shrink-0 items-center justify-center rounded",
+            isMenuOpen
+              ? "flex"
+              : "hidden opacity-0 group-hover:flex group-hover:opacity-100",
+          )}
+        >
+          <EllipsisVertical
+            className="text-[#64748b] hover:text-[#0f172a]"
+            size={15}
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem className="gap-2" onClick={handleClickEdit}>
+            <Pencil size={16} />
+            이름 변경
+          </DropdownMenuItem>
+          <DropdownMenuItem className="gap-2" onClick={handleClickDelete}>
+            <Trash size={16} />
+            삭제
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </Link>
   );
 };

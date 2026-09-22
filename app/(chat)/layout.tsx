@@ -8,12 +8,15 @@ const ChatLayout = ({ children }: { children: ReactNode }) => {
     <UserProvider>
       <div className="md:flex h-full">
         {/* 사이드바 영역 */}
-        <div className="hidden md:block w-75">
+        <div className="hidden md:block w-[288px]">
           <Sidebar />
         </div>
         {/* 헤더 + chat 영역 */}
-        <div className="flex flex-col flex-1 h-full overflow-y-auto">
-          <Header />
+        <div
+          className="flex flex-col flex-1 h-full overflow-y-auto"
+          id="home-layout"
+        >
+          <Header sidebar={<Sidebar />} />
           {children}
         </div>
       </div>
