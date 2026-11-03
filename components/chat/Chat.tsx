@@ -2,6 +2,9 @@
 
 import Empty from "./Empty";
 import Message from "./Message";
+import WorkspaceMessage from "./WorkspaceMessage";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { useModelStore } from "@/stores/model";
@@ -9,18 +12,23 @@ import { useParams, useRouter } from "next/navigation";
 import {
   addMessage,
   createConversationWithMessage,
+  createWorkspaceConversationWithMessage,
+  generateWorkspaceConversationTitle,
   updateLastAssistantMessage,
 } from "@/actions/conversations";
 import type { UIMessage } from "ai";
-import { CHAT_ROUTES } from "@/constants/routes";
+import { CHAT_ROUTES, WORKSPACE_ROUTES } from "@/constants/routes";
 import { useUserStore } from "@/stores/user";
 import toast from "react-hot-toast";
 import { ChatUIMessage } from "@/types/chat";
 import MessageComposer from "./MessageComposer";
 import { ArrowDown } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 
 type Props = {
   initialMessages?: ChatUIMessage[];
+  workspaceId?: string;
+  workspaceName?: string;
 };
 
 const getTextFromMessage = (message: UIMessage) =>
@@ -29,7 +37,13 @@ const getTextFromMessage = (message: UIMessage) =>
     .map((part) => part.text)
     .join("");
 
-const Chat = ({ initialMessages }: Props) => {
+const formatMessageTime = (createdAt?: string) =>
+  new Date(createdAt ?? Date.now()).toLocaleTimeString("ko-KR", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
   const { id } = useParams<{ id?: string }>();
   const router = useRouter();
 
@@ -42,6 +56,8 @@ const Chat = ({ initialMessages }: Props) => {
   const isContinuingPendingReplyRef = useRef(false);
   const isRegeneratingRef = useRef(false);
   const hasAutoRegeneratedRef = useRef(false);
+  const isNewWorkspaceConversationRef = useRef(false);
+  const queryClient = useQueryClient();
 
   const storeModel = useModelStore((state) => state.model);
   const storeUser = useUserStore((state) => state.user);
@@ -53,20 +69,53 @@ const Chat = ({ initialMessages }: Props) => {
 
       const assistantContent = getTextFromMessage(message);
 
+      const maybeGenerateWorkspaceTitle = async (
+        finishedMessages: UIMessage[],
+        assistantContent: string,
+      ) => {
+        if (!isNewWorkspaceConversationRef.current || !id) return;
+        isNewWorkspaceConversationRef.current = false;
+
+        const lastUserMessage = [...finishedMessages]
+          .reverse()
+          .find((m) => m.role === "user");
+        const userContent = lastUserMessage
+          ? getTextFromMessage(lastUserMessage)
+          : "";
+
+        await generateWorkspaceConversationTitle(
+          id,
+          userContent,
+          assistantContent,
+          storeModel,
+        );
+        queryClient.invalidateQueries({ queryKey: ["conversation", id] });
+      };
+
       if (isRegeneratingRef.current) {
         isRegeneratingRef.current = false;
-        await updateLastAssistantMessage(id, assistantContent, storeModel);
+        await updateLastAssistantMessage(
+          id,
+          assistantContent,
+          storeModel,
+          workspaceId,
+        );
         return;
       }
 
       if (isContinuingPendingReplyRef.current) {
-        // 이동 전에 사용자 메시지는 이미 저장해뒀으니 답변만 저장
         isContinuingPendingReplyRef.current = false;
-        await addMessage(id, assistantContent, "assistant", storeModel);
+        await addMessage(
+          id,
+          assistantContent,
+          "assistant",
+          storeModel,
+          workspaceId,
+        );
+        await maybeGenerateWorkspaceTitle(finishedMessages, assistantContent);
         return;
       }
 
-      // 기존 대화방에서 계속 대화하는 경우: 유저 메세지 + 답변 저장
       const lastUserMessage = [...finishedMessages]
         .reverse()
         .find((m) => m.role === "user");
@@ -74,8 +123,14 @@ const Chat = ({ initialMessages }: Props) => {
         ? getTextFromMessage(lastUserMessage)
         : "";
 
-      await addMessage(id, userContent, "user");
-      await addMessage(id, assistantContent, "assistant", storeModel);
+      await addMessage(id, userContent, "user", undefined, workspaceId);
+      await addMessage(
+        id,
+        assistantContent,
+        "assistant",
+        storeModel,
+        workspaceId,
+      );
     },
   });
 
@@ -86,17 +141,26 @@ const Chat = ({ initialMessages }: Props) => {
     .reverse()
     .find((m) => m.role === "assistant");
 
+  const createConversation = workspaceId
+    ? (text: string) =>
+        createWorkspaceConversationWithMessage(workspaceId, text)
+    : createConversationWithMessage;
+
+  const buildConversationHref = (conversationId: string) =>
+    workspaceId
+      ? WORKSPACE_ROUTES.CONVERSATION(workspaceId, conversationId)
+      : `${CHAT_ROUTES.CONVERSATIONS}/${conversationId}`;
+
   const handleSubmit = async () => {
     const text = inputValue;
     if (!text.trim()) return;
     setInputValue("");
 
-    // 새로운 대화 일때,
     if (!id) {
       setIsCreatingConversation(true);
       try {
-        const conversation = await createConversationWithMessage(text);
-        router.push(`${CHAT_ROUTES.CONVERSATIONS}/${conversation.id}`);
+        const conversation = await createConversation(text);
+        router.push(buildConversationHref(conversation.id));
       } catch (error) {
         console.error("error:", error);
         toast.error("대화 생성에 실패하였습니다.");
@@ -106,7 +170,7 @@ const Chat = ({ initialMessages }: Props) => {
       return;
     }
 
-    sendMessage({ text }, { body: { model: storeModel } });
+    sendMessage({ text }, { body: { model: storeModel } }); // ← 빠졌던 줄 복구
   };
 
   const isEmpty = !id && messages.length === 0;
@@ -133,6 +197,10 @@ const Chat = ({ initialMessages }: Props) => {
     if (lastMessage?.role === "user") {
       hasAutoRegeneratedRef.current = true;
       isContinuingPendingReplyRef.current = true;
+      if (workspaceId) {
+        isNewWorkspaceConversationRef.current = true;
+      }
+
       regenerate({ body: { model: storeModel } });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -170,6 +238,7 @@ const Chat = ({ initialMessages }: Props) => {
           onInputChange={setInputValue}
           onSubmit={handleSubmit}
           disabled={isCreatingConversation}
+          workspaceName={workspaceName}
         />
       ) : (
         <>
@@ -178,6 +247,50 @@ const Chat = ({ initialMessages }: Props) => {
             <div className="space-y-7">
               {messages.map((message) => {
                 const isLast = message.id === messages[messages.length - 1]?.id;
+                const isLoading =
+                  isLast &&
+                  message.role === "assistant" &&
+                  getTextFromMessage(message) === "" &&
+                  (status === "submitted" || status === "streaming");
+
+                if (workspaceId) {
+                  // 워크스페이스 공유 대화: 현재는 메시지에 작성자(userId)를 저장하지
+                  // 않아서, user 메시지는 전부 "나"로 표시합니다(다른 멤버 구분은
+                  // message 테이블에 작성자 컬럼이 추가되면 지원 예정).
+                  if (message.role === "user") {
+                    return (
+                      <WorkspaceMessage
+                        key={message.id}
+                        role="self"
+                        author={{
+                          name: storeUser.name || "",
+                          initial: (storeUser.name || "").slice(-2),
+                        }}
+                        timestamp={formatMessageTime(
+                          message.metadata?.createdAt,
+                        )}
+                        content={getTextFromMessage(message)}
+                      />
+                    );
+                  }
+
+                  return (
+                    <WorkspaceMessage
+                      key={message.id}
+                      role="assistant"
+                      model={message.metadata?.model}
+                      timestamp={formatMessageTime(
+                        message.metadata?.createdAt,
+                      )}
+                      isLoading={isLoading}
+                      content={
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {getTextFromMessage(message)}
+                        </ReactMarkdown>
+                      }
+                    />
+                  );
+                }
 
                 return (
                   <Message
@@ -188,12 +301,7 @@ const Chat = ({ initialMessages }: Props) => {
                     model={message.metadata?.model}
                     createdAt={message.metadata?.createdAt}
                     isLastAssistant={message.id === lastAssistantMessage?.id}
-                    isLoading={
-                      isLast &&
-                      message.role === "assistant" &&
-                      getTextFromMessage(message) === "" &&
-                      (status === "submitted" || status === "streaming")
-                    }
+                    isLoading={isLoading}
                     handleRegenerateButton={assistantRegenerate}
                     handleCopyButton={onCopy}
                   />
