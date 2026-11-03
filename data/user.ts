@@ -22,6 +22,7 @@ export const getConversationsByUser = async () => {
     where: { id: session.id },
     with: {
       conversations: {
+        where: { workspaceId: { isNull: true } },
         orderBy: (conversation, { desc }) => [desc(conversation.updatedAt)],
       },
     },

@@ -7,8 +7,10 @@ import {
   MouseEvent,
   ReactNode,
   useEffect,
+  useOptimistic,
   useRef,
   useState,
+  useTransition,
 } from "react";
 import {
   DropdownMenu,
@@ -18,6 +20,7 @@ import {
 } from "../ui/dropdown-menu";
 import { EllipsisVertical, Pencil, Trash } from "lucide-react";
 import { useParams, usePathname, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "cn";
 import { useSheetStore } from "@/stores/sheet";
 import {
@@ -31,19 +34,21 @@ import { BASE_URL } from "@/constants/routes";
 
 type Props = {
   item: { id: string; label: string; href: string };
+  onDelete: (id: string) => void;
 };
-const SidebarItem = ({ item }: Props) => {
+const SidebarItem = ({ item, onDelete }: Props) => {
   const { id, label, href } = item;
+  const [optimisticLabel, setOptimisticLabel] = useOptimistic(label);
   const pathName = usePathname();
   const editInputRef = useRef<HTMLInputElement>(null);
-  const { id: conversationId } = useParams<{ id: string }>();
-  const router = useRouter();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editInputValue, setEditInputValue] = useState(item.label);
 
   const setOpen = useSheetStore((state) => state.setOpen);
-  const { openModal, closeModal } = useModalStore((state) => state);
+  const queryClient = useQueryClient();
+
+  const [isRenaming, startRenameTransition] = useTransition();
 
   useEffect(() => {
     if (isEditMode) {
@@ -64,16 +69,21 @@ const SidebarItem = ({ item }: Props) => {
     setEditInputValue(e.target.value);
   };
 
-  const handleBlurEditInput = async () => {
+  const handleBlurEditInput = () => {
     setIsEditMode(false);
     if (editInputValue === label) return;
 
-    try {
-      await updateConversation(id, editInputValue);
-    } catch (error) {
-      console.error("error:", error);
-      toast.error("대화명 수정에 실패하였습니다.");
-    }
+    startRenameTransition(async () => {
+      setOptimisticLabel(editInputValue);
+      try {
+        await updateConversation(id, editInputValue);
+        // Header가 useQuery(["conversation", id])로 같은 대화를 보고 있을 수 있어 함께 갱신
+        queryClient.invalidateQueries({ queryKey: ["conversation", id] });
+      } catch (error) {
+        console.error("error:", error);
+        toast.error("대화명 수정에 실패하였습니다.");
+      }
+    });
   };
 
   const handleKeydown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -86,28 +96,7 @@ const SidebarItem = ({ item }: Props) => {
     e.preventDefault();
     e.stopPropagation();
 
-    openModal({
-      title: "정말 삭제하시겠습니까?",
-      description: "삭제 후 데이터는 복구하기 어려울 수 있습니다.",
-      footer: <ModalFooter onCancel={closeModal} onConfirm={handleDelete} />,
-    });
-  };
-
-  const handleDelete = async () => {
-    try {
-      await deleteConversation(id);
-
-      if (conversationId === id) {
-        router.replace(BASE_URL);
-      }
-
-      toast.success("삭제에 성공했습니다.");
-
-      closeModal();
-    } catch (error) {
-      console.error("error:", error);
-      toast.error("삭제에 실패했습니다.");
-    }
+    onDelete(id);
   };
 
   const isActive = pathName === href;
@@ -132,7 +121,7 @@ const SidebarItem = ({ item }: Props) => {
           src={
             isActive
               ? "/icon-active-conversation.svg"
-              : "/icon-Inactive-conversation.svg"
+              : "/icon-inactive-conversation.svg"
           }
           className="size-3.75"
           alt={
@@ -152,9 +141,10 @@ const SidebarItem = ({ item }: Props) => {
             }}
             onBlur={handleBlurEditInput}
             onKeyDown={handleKeydown}
+            disabled={isRenaming}
           />
         ) : (
-          <div className="min-w-0 flex-1 truncate">{label}</div>
+          <div className="min-w-0 flex-1 truncate">{optimisticLabel}</div>
         )}
       </div>
 
