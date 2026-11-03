@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     model: (typeof AI_MODEL)[number]["value"];
   } = await req.json();
 
-  const selectedModel = model || "gpt-4.1-nano";
+  const selectedModel = model || "gpt-4o-mini";
 
   const result = streamText({
     model: openai(selectedModel),

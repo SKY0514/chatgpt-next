@@ -10,7 +10,7 @@ type Action = {
 
 // Create your store, which includes both state and (optionally) actions
 const useModelStore = create<State & Action>()((set) => ({
-  model: "gpt-4.1-nano",
+  model: "gpt-4o-mini",
   updateModel: (model) => set(() => ({ model })),
 }));
 
