@@ -5,6 +5,7 @@ import { SignUpSchema } from "@/schemas/auth";
 import db from "@/db";
 import { user } from "@/db/schema";
 import { redirect } from "next/navigation";
+import { joinPendingWorkspaceInvites } from "@/actions/workspaces";
 
 export const signup = async (_: any, formData: FormData) => {
   // 1. validate fields
@@ -36,7 +37,13 @@ export const signup = async (_: any, formData: FormData) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // 3. insert db
-    await db.insert(user).values({ name, email, password: hashedPassword });
+    const [newUser] = await db
+      .insert(user)
+      .values({ name, email, password: hashedPassword })
+      .returning({ id: user.id });
+
+    // 이 이메일 앞으로 온 워크스페이스 초대가 있으면 가입과 동시에 합류시킵니다.
+    await joinPendingWorkspaceInvites(newUser.id, email);
   } catch (error) {
     console.error("error", error);
     return { errorMessage: "문제가 발생했습니다." };
