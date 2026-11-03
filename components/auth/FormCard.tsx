@@ -23,13 +23,11 @@ const FormCard = ({ title, subtitle, footer, children }: Props) => {
       />
       <Card className="relative flex w-full flex-col items-center gap-6 rounded-2xl p-6 has-data-[slot=card-footer]:pb-6 shadow-[0px_20px_25px_-5px_rgba(210,217,244,0.4),0px_8px_10px_-6px_rgba(210,217,244,0.4)] ring-0 sm:p-10 sm:has-data-[slot=card-footer]:pb-10">
         <CardHeader className="flex w-full flex-col items-center gap-1 text-center">
-          <div className="mb-3 flex size-14 items-center justify-center rounded-2xl bg-linear-to-b from-secondary to-primary shadow-[0px_4px_6px_-1px_rgba(70,72,212,0.2),0px_2px_4px_-2px_rgba(70,72,212,0.2)]">
-            <Image
-              src="/threadly-bot.png"
+          <div className="mb-3 flex size-14 items-center justify-center rounded-2xl bg-linear-to-b from-[#645efb] to-[#4648d4] shadow-[0px_4px_6px_-1px_rgba(70,72,212,0.2),0px_2px_4px_-2px_rgba(70,72,212,0.2)]">
+            <img
+              src="/icon-sidebar.svg"
               alt="login icon"
-              width={36}
-              height={36}
-              className="size-9"
+              className="w-6.5 h-6"
             />
           </div>
           <p className="text-[22px] font-extrabold tracking-[-0.55px] text-foreground">

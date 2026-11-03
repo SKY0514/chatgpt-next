@@ -25,6 +25,11 @@ const SignUpForm = () => {
   } = useForm<TSignUpForm>({
     resolver: zodResolver(SignUpSchema),
     mode: "onChange",
+    defaultValues: {
+      name: "",
+      email: "",
+      password: "",
+    },
   });
 
   const onSubmit = (data: TSignUpForm) => {

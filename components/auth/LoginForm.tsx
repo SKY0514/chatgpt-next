@@ -29,14 +29,16 @@ const LoginForm = ({ from }: { from?: string }) => {
   } = useForm<TLoginForm>({
     resolver: zodResolver(LoginSchema),
     mode: "onChange",
+    defaultValues: {
+      email: "",
+      password: "",
+    },
   });
 
   // effect
 
   useEffect(() => {
     if (error?.errorMessage) {
-      console.log("error?.errorMessage", error?.errorMessage);
-
       toast.error(error.errorMessage);
     }
   }, [error]);

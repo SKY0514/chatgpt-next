@@ -5,11 +5,25 @@ import { Avatar, AvatarFallback } from "../ui/avatar";
 import { useUserStore } from "@/stores/user";
 import { deleteSession } from "@/actions/sessions";
 import { Button } from "@base-ui/react";
+import { useTransition } from "react";
+import toast from "react-hot-toast";
 
 const UserProfileCard = () => {
+  const [isPending, startTransition] = useTransition();
   const name = useUserStore((state) => state.user.name);
   const email = useUserStore((state) => state.user.email);
   const initials = (name || "").slice(-2);
+
+  const handleLogout = () => {
+    startTransition(async () => {
+      try {
+        await deleteSession();
+      } catch (error) {
+        console.error("error:", error);
+        toast.error("로그아웃에 실패하였습니다.");
+      }
+    });
+  };
 
   return (
     <div className="w-full border-t border-[#e2e8f0]/50 px-1 pt-2">
@@ -35,7 +49,8 @@ const UserProfileCard = () => {
 
         <Button
           className="size-8 text-[#64748b] flex items-center justify-center shrink-0"
-          onClick={() => deleteSession()}
+          disabled={isPending}
+          onClick={handleLogout}
         >
           <LogOut size={14} strokeWidth={2.5} />
         </Button>
