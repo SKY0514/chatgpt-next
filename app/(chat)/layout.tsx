@@ -1,3 +1,4 @@
+import CreateWorkspaceModal from "@/components/chat/CreateWorkspaceModal";
 import Header from "@/components/chat/Header";
 import Sidebar from "@/components/chat/Sidebar";
 import UserProvider from "@/providers/UserProvider";
@@ -20,6 +21,7 @@ const ChatLayout = ({ children }: { children: ReactNode }) => {
           {children}
         </div>
       </div>
+      <CreateWorkspaceModal />
     </UserProvider>
   );
 };
