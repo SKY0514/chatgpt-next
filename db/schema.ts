@@ -1,5 +1,5 @@
 import { defineRelations } from "drizzle-orm";
-import { text, timestamp, pgTable, uuid } from "drizzle-orm/pg-core";
+import { text, timestamp, pgTable, uuid, unique } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: uuid("id").defaultRandom().notNull().primaryKey(),
@@ -43,34 +43,36 @@ export const workspace = pgTable("workspace", {
   ownerId: uuid("ownerId")
     .references(() => user.id, { onDelete: "cascade" })
     .notNull(),
+  // 미가입자 초대용 링크(/invite/[inviteToken])에 쓰는 토큰. 워크스페이스당
+  // 하나만 유지하며, 오너가 재발급하면 이전 링크는 자동으로 무효화됩니다.
+  inviteToken: text("invite_token").notNull().unique(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export const workspaceMember = pgTable("workspace_member", {
-  id: uuid("id").defaultRandom().notNull().primaryKey(),
-  workspaceId: uuid("workspaceId")
-    .references(() => workspace.id, { onDelete: "cascade" })
-    .notNull(),
-  userId: uuid("userId")
-    .references(() => user.id, { onDelete: "cascade" })
-    .notNull(),
-  role: text("role").$type<"owner" | "admin" | "member">().notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// 아직 가입하지 않은 이메일을 초대했을 때 보관되는 대기 초대.
-// 그 이메일로 회원가입이 완료되면 workspaceMember 행을 만들고 이 행은 삭제됩니다.
-export const workspaceInvite = pgTable("workspace_invite", {
-  id: uuid("id").defaultRandom().notNull().primaryKey(),
-  workspaceId: uuid("workspaceId")
-    .references(() => workspace.id, { onDelete: "cascade" })
-    .notNull(),
-  email: text("email").notNull(),
-  role: text("role").$type<"admin" | "member">().notNull(),
-  token: text("token").notNull().unique(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+export const workspaceMember = pgTable(
+  "workspace_member",
+  {
+    id: uuid("id").defaultRandom().notNull().primaryKey(),
+    workspaceId: uuid("workspaceId")
+      .references(() => workspace.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: uuid("userId")
+      .references(() => user.id, { onDelete: "cascade" })
+      .notNull(),
+    role: text("role").$type<"owner" | "admin" | "member">().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // 한 사람이 같은 워크스페이스에 두 번 가입할 수 없도록 DB에서 막습니다.
+    // (이메일 추가/초대 링크 둘 다 "이미 멤버인지" 미리 확인하지만, 동시에
+    // 두 번 눌렀을 때를 대비한 최종 안전장치입니다.)
+    unique("workspace_member_workspace_user_key").on(
+      table.workspaceId,
+      table.userId,
+    ),
+  ],
+);
 
 const schema = {
   user,
@@ -78,7 +80,6 @@ const schema = {
   message,
   workspace,
   workspaceMember,
-  workspaceInvite,
 };
 
 export const relations = defineRelations(schema, (r) => ({
@@ -125,10 +126,6 @@ export const relations = defineRelations(schema, (r) => ({
       from: r.workspace.id,
       to: r.workspaceMember.workspaceId,
     }),
-    invites: r.many.workspaceInvite({
-      from: r.workspace.id,
-      to: r.workspaceInvite.workspaceId,
-    }),
     conversations: r.many.conversation({
       from: r.workspace.id,
       to: r.conversation.workspaceId,
@@ -143,12 +140,6 @@ export const relations = defineRelations(schema, (r) => ({
     user: r.one.user({
       from: r.workspaceMember.userId,
       to: r.user.id,
-    }),
-  },
-  workspaceInvite: {
-    workspace: r.one.workspace({
-      from: r.workspaceInvite.workspaceId,
-      to: r.workspace.id,
     }),
   },
 }));
