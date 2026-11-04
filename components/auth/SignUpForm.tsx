@@ -14,7 +14,7 @@ import toast from "react-hot-toast";
 
 type TSignUpForm = z.infer<typeof SignUpSchema>;
 
-const SignUpForm = () => {
+const SignUpForm = ({ from }: { from?: string }) => {
   const [error, action, isPending] = useActionState(signup, undefined);
   const [, startTransition] = useTransition();
   const [showPassword, setShowPassword] = useState(false);
@@ -37,6 +37,7 @@ const SignUpForm = () => {
     formData.append("name", data.name);
     formData.append("email", data.email);
     formData.append("password", data.password);
+    if (from) formData.append("from", from);
 
     startTransition(() => {
       action(formData);
@@ -58,7 +59,7 @@ const SignUpForm = () => {
       footer={{
         label: "이미 계정이 있으신가요?",
         linkLabel: "로그인",
-        href: "/login",
+        href: from ? `/login?from=${encodeURIComponent(from)}` : "/login",
       }}
     >
       <form className="space-y-3" onSubmit={handleSubmit(onSubmit)}>

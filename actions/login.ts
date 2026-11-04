@@ -5,6 +5,7 @@ import { LoginSchema } from "@/schemas/auth";
 import bcrypt from "bcryptjs";
 import { createSession } from "./sessions";
 import { redirect } from "next/navigation";
+import { isSafeRedirectPath } from "@/utils";
 export const login = async (_: any, formData: FormData) => {
   // 1. validate fields
 
@@ -50,9 +51,6 @@ export const login = async (_: any, formData: FormData) => {
   }
 
   const from = formData.get("from");
-  // "/"로 시작하는 내부 경로만 허용 (open redirect 방지)
-  const isSafeRedirect =
-    typeof from === "string" && from.startsWith("/") && !from.startsWith("//");
 
-  redirect(isSafeRedirect ? from : "/");
+  redirect(isSafeRedirectPath(from) ? from : "/");
 };

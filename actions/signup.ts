@@ -5,7 +5,7 @@ import { SignUpSchema } from "@/schemas/auth";
 import db from "@/db";
 import { user } from "@/db/schema";
 import { redirect } from "next/navigation";
-import { joinPendingWorkspaceInvites } from "@/actions/workspaces";
+import { isSafeRedirectPath } from "@/utils";
 
 export const signup = async (_: any, formData: FormData) => {
   // 1. validate fields
@@ -37,17 +37,21 @@ export const signup = async (_: any, formData: FormData) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // 3. insert db
-    const [newUser] = await db
+    await db
       .insert(user)
       .values({ name, email, password: hashedPassword })
       .returning({ id: user.id });
-
-    // 이 이메일 앞으로 온 워크스페이스 초대가 있으면 가입과 동시에 합류시킵니다.
-    await joinPendingWorkspaceInvites(newUser.id, email);
   } catch (error) {
     console.error("error", error);
     return { errorMessage: "문제가 발생했습니다." };
   }
 
-  redirect("/login");
+  // 초대 링크(/invite/[token])를 통해 들어왔던 경우, 가입 후 로그인까지
+  // 마치면 다시 그 링크로 돌아가도록 from을 이어서 전달합니다.
+  const from = formData.get("from");
+  const loginUrl = isSafeRedirectPath(from)
+    ? `/login?from=${encodeURIComponent(from)}`
+    : "/login";
+
+  redirect(loginUrl);
 };

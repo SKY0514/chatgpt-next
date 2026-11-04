@@ -64,7 +64,7 @@ const LoginForm = ({ from }: { from?: string }) => {
       footer={{
         label: "계정이 없으신가요?",
         linkLabel: "회원가입",
-        href: "/signup",
+        href: from ? `/signup?from=${encodeURIComponent(from)}` : "/signup",
       }}
     >
       <form className="space-y-3" onSubmit={handleSubmit(onSubmit)}>
