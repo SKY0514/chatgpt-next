@@ -33,6 +33,9 @@ export const message = pgTable("message", {
   conversationId: uuid("conversationId")
     .references(() => conversation.id, { onDelete: "cascade" })
     .notNull(),
+  // role이 "user"인 메시지를 실제로 보낸 사람. 워크스페이스 공유 대화에서
+  // "누가 보냈는지" 구분하는 데 씁니다 — assistant 메시지는 null.
+  userId: uuid("userId").references(() => user.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -48,6 +51,18 @@ export const workspace = pgTable("workspace", {
   inviteToken: text("invite_token").notNull().unique(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const workspaceComment = pgTable("workspace_comment", {
+  id: uuid("id").defaultRandom().notNull().primaryKey(),
+  messageId: uuid("messageId")
+    .references(() => message.id, { onDelete: "cascade" })
+    .notNull(),
+  userId: uuid("userId")
+    .references(() => user.id, { onDelete: "cascade" })
+    .notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const workspaceMember = pgTable(
@@ -80,6 +95,7 @@ const schema = {
   message,
   workspace,
   workspaceMember,
+  workspaceComment,
 };
 
 export const relations = defineRelations(schema, (r) => ({
@@ -116,6 +132,14 @@ export const relations = defineRelations(schema, (r) => ({
       from: r.message.conversationId,
       to: r.conversation.id,
     }),
+    user: r.one.user({
+      from: r.message.userId,
+      to: r.user.id,
+    }),
+    comments: r.many.workspaceComment({
+      from: r.message.id,
+      to: r.workspaceComment.messageId,
+    }),
   },
   workspace: {
     owner: r.one.user({
@@ -140,6 +164,18 @@ export const relations = defineRelations(schema, (r) => ({
     user: r.one.user({
       from: r.workspaceMember.userId,
       to: r.user.id,
+    }),
+  },
+  workspaceComment: {
+    message: r.one.message({
+      from: r.workspaceComment.messageId,
+      to: r.message.id,
+      optional: false,
+    }),
+    user: r.one.user({
+      from: r.workspaceComment.userId,
+      to: r.user.id,
+      optional: false,
     }),
   },
 }));

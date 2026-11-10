@@ -15,6 +15,7 @@ export const getMessagesByConversation = async (id: string) => {
     with: {
       messages: {
         orderBy: (message, { asc }) => [asc(message.createdAt)],
+        with: { user: true },
       },
     },
   });
@@ -26,6 +27,8 @@ export const getMessagesByConversation = async (id: string) => {
       metadata: {
         model: message.model ?? undefined,
         createdAt: message.createdAt.toISOString(),
+        authorId: message.user?.id,
+        authorName: message.user?.name,
       },
       parts: [{ type: "text", text: message.content ?? "" }],
     }),
