@@ -8,12 +8,18 @@ import remarkGfm from "remark-gfm";
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { useModelStore } from "@/stores/model";
+import {
+  useWorkspaceCommentPanelStore,
+  workspaceMessageElementId,
+} from "@/stores/workspaceCommentPanel";
 import { useParams, useRouter } from "next/navigation";
 import {
   addMessage,
   createConversationWithMessage,
   createWorkspaceConversationWithMessage,
   generateWorkspaceConversationTitle,
+  getConversationMessages,
+  notifyPendingMessage,
   updateLastAssistantMessage,
 } from "@/actions/conversations";
 import type { UIMessage } from "ai";
@@ -23,7 +29,11 @@ import toast from "react-hot-toast";
 import { ChatUIMessage } from "@/types/chat";
 import MessageComposer from "./MessageComposer";
 import { ArrowDown } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { formatMessageTime } from "@/utils";
+import { WORKSPACE_POLL_INTERVAL } from "@/constants/chat";
+import pusherClient from "@/lib/pusherClient";
+import { PUSHER_EVENTS, workspaceConversationChannel } from "@/constants/pusher";
 
 type Props = {
   initialMessages?: ChatUIMessage[];
@@ -37,12 +47,6 @@ const getTextFromMessage = (message: UIMessage) =>
     .map((part) => part.text)
     .join("");
 
-const formatMessageTime = (createdAt?: string) =>
-  new Date(createdAt ?? Date.now()).toLocaleTimeString("ko-KR", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-
 const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
   const { id } = useParams<{ id?: string }>();
   const router = useRouter();
@@ -50,6 +54,23 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
   const [inputValue, setInputValue] = useState("");
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  // 다른 멤버가 막 보낸 질문을 AI 응답이 끝나기 전에 먼저 보여주기 위한
+  // 임시 표시용 상태 — 실제 메시지(new-message)가 도착하면 비웁니다.
+  const [pendingRemoteMessages, setPendingRemoteMessages] = useState<
+    { authorId: string; authorName: string; content: string }[]
+  >([]);
+
+  // 코멘트 패널 — 헤더까지 함께 좁혀야 해서 레이아웃(HomeLayoutContent)과
+  // 공유하는 전역 상태로 관리합니다.
+  const openCommentMessageId = useWorkspaceCommentPanelStore(
+    (state) => state.openComment?.messageId,
+  );
+  const highlightedMessageId = useWorkspaceCommentPanelStore(
+    (state) => state.highlightedMessageId,
+  );
+  const toggleCommentPanel = useWorkspaceCommentPanelStore(
+    (state) => state.toggle,
+  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const isFirstRenderRef = useRef(true);
@@ -62,8 +83,12 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
   const storeModel = useModelStore((state) => state.model);
   const storeUser = useUserStore((state) => state.user);
 
-  const { messages, sendMessage, regenerate, status } = useChat<ChatUIMessage>({
+  const { messages, sendMessage, regenerate, status, setMessages } = useChat<ChatUIMessage>({
     messages: initialMessages,
+    // 메시지 id를 DB에도 그대로 저장할 수 있는 형식(uuid)으로 맞춥니다 —
+    // 코멘트가 messageId로 메시지를 참조하는데, 새로고침 전/후로 id가
+    // 달라지면 방금 스트리밍된 메시지에 코멘트를 남길 수 없게 됩니다.
+    generateId: () => crypto.randomUUID(),
     onFinish: async ({ message, messages: finishedMessages }) => {
       if (!id) return;
 
@@ -111,6 +136,7 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
           "assistant",
           storeModel,
           workspaceId,
+          message.id,
         );
         await maybeGenerateWorkspaceTitle(finishedMessages, assistantContent);
         return;
@@ -123,16 +149,88 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
         ? getTextFromMessage(lastUserMessage)
         : "";
 
-      await addMessage(id, userContent, "user", undefined, workspaceId);
+      await addMessage(
+        id,
+        userContent,
+        "user",
+        undefined,
+        workspaceId,
+        lastUserMessage?.id,
+      );
       await addMessage(
         id,
         assistantContent,
         "assistant",
         storeModel,
         workspaceId,
+        message.id,
       );
     },
   });
+
+  // 워크스페이스 공유 대화에선 다른 멤버가 보낸 메시지가 이 브라우저의
+  // useChat 상태엔 전혀 없어서(각자 따로 들고 있는 로컬 상태), 주기적으로
+  // DB를 다시 읽어와 로컬에 없는 메시지만 합쳐줍니다.
+  const { data: remoteMessages } = useQuery({
+    queryKey: ["conversation-messages", id],
+    queryFn: () => getConversationMessages(id!),
+    enabled: !!workspaceId && !!id,
+    refetchInterval: WORKSPACE_POLL_INTERVAL,
+  });
+
+  useEffect(() => {
+    if (!remoteMessages) return;
+
+    setMessages((current) => {
+      const currentById = new Map(current.map((m) => [m.id, m]));
+      const remoteIds = new Set(remoteMessages.map((m) => m.id));
+
+      const hasNewRemote = remoteMessages.some((m) => !currentById.has(m.id));
+      if (!hasNewRemote) return current;
+
+      // remote(DB, 시간순 정답)를 뼈대로 쓰되, 이미 로컬에 있는 메시지는
+      // 그대로 로컬 버전을 씁니다 — 지금 스트리밍/재생성 중인 최신 내용을
+      // 오래된 remote 내용으로 덮어쓰지 않기 위해서예요. 아직 DB에 없는
+      // 로컬 전용 메시지(막 보낸 응답 등)는 remote보다 최신이니 맨 뒤에
+      // 그대로 둡니다.
+      const merged = remoteMessages.map((m) => currentById.get(m.id) ?? m);
+      const localOnly = current.filter((m) => !remoteIds.has(m.id));
+
+      return [...merged, ...localOnly];
+    });
+  }, [remoteMessages, setMessages]);
+
+  // Pusher로 "이 대화방에 새 메시지/코멘트가 생겼다"는 신호를 받으면, 위
+  // 폴링 쿼리와 코멘트 쿼리를 즉시 다시 읽어오게 합니다. 폴링의 refetchInterval은
+  // 이 이벤트를 놓쳤을 때를 대비한 느슨한 안전망으로만 남겨뒀어요.
+  useEffect(() => {
+    if (!workspaceId || !id) return;
+
+    const channel = pusherClient.subscribe(workspaceConversationChannel(id));
+
+    channel.bind(PUSHER_EVENTS.NEW_MESSAGE, () => {
+      queryClient.invalidateQueries({ queryKey: ["conversation-messages", id] });
+      // 실제 메시지가 도착했으니, 그 전까지 보여주던 임시 표시는 치웁니다.
+      setPendingRemoteMessages([]);
+    });
+    channel.bind(PUSHER_EVENTS.NEW_COMMENT, (data: { messageId: string }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["workspace-comments", data.messageId],
+      });
+    });
+    channel.bind(
+      PUSHER_EVENTS.PENDING_MESSAGE,
+      (data: { authorId: string; authorName: string; content: string }) => {
+        // 내가 보낸 메시지는 이미 내 화면에 바로 보이니 중복으로 또 띄우지 않습니다.
+        if (data.authorId === storeUser.id) return;
+        setPendingRemoteMessages((prev) => [...prev, data]);
+      },
+    );
+
+    return () => {
+      pusherClient.unsubscribe(workspaceConversationChannel(id));
+    };
+  }, [workspaceId, id, queryClient, storeUser.id]);
 
   const isBusy =
     isCreatingConversation || status === "submitted" || status === "streaming";
@@ -171,6 +269,15 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
     }
 
     sendMessage({ text }, { body: { model: storeModel } }); // ← 빠졌던 줄 복구
+
+    // AI 응답이 끝나야 저장/발행되는 new-message와 별개로, 질문이 왔다는
+    // 것만 먼저 다른 멤버들에게 알려줍니다. 실패해도 치명적이지 않고,
+    // 내 전송 자체를 늦출 이유도 없어서 기다리지 않습니다.
+    if (workspaceId) {
+      notifyPendingMessage(id, text).catch((error) => {
+        console.error("error:", error);
+      });
+    }
   };
 
   const isEmpty = !id && messages.length === 0;
@@ -211,7 +318,7 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
       behavior: isFirstRenderRef.current ? "auto" : "smooth",
     });
     isFirstRenderRef.current = false;
-  }, [messages]);
+  }, [messages, pendingRemoteMessages]);
 
   useEffect(() => {
     const scrollContainer = scrollRef.current?.closest("#home-layout");
@@ -254,17 +361,22 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
                   (status === "submitted" || status === "streaming");
 
                 if (workspaceId) {
-                  // 워크스페이스 공유 대화: 현재는 메시지에 작성자(userId)를 저장하지
-                  // 않아서, user 메시지는 전부 "나"로 표시합니다(다른 멤버 구분은
-                  // message 테이블에 작성자 컬럼이 추가되면 지원 예정).
                   if (message.role === "user") {
+                    // 방금 이 브라우저에서 보낸 메시지는 아직 서버 메타데이터가
+                    // 없어서(스트리밍 중) authorId가 비어있는데, 그 경우는
+                    // 당연히 지금 보고 있는 나 자신이 보낸 메시지입니다.
+                    const authorId = message.metadata?.authorId ?? storeUser.id;
+                    const authorName =
+                      message.metadata?.authorName ?? storeUser.name ?? "";
+                    const isSelf = authorId === storeUser.id;
+
                     return (
                       <WorkspaceMessage
                         key={message.id}
-                        role="self"
+                        role={isSelf ? "self" : "member"}
                         author={{
-                          name: storeUser.name || "",
-                          initial: (storeUser.name || "").slice(-2),
+                          name: authorName,
+                          initial: authorName.slice(-2),
                         }}
                         timestamp={formatMessageTime(
                           message.metadata?.createdAt,
@@ -275,20 +387,37 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
                   }
 
                   return (
-                    <WorkspaceMessage
+                    <div
                       key={message.id}
-                      role="assistant"
-                      model={message.metadata?.model}
-                      timestamp={formatMessageTime(
-                        message.metadata?.createdAt,
-                      )}
-                      isLoading={isLoading}
-                      content={
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {getTextFromMessage(message)}
-                        </ReactMarkdown>
-                      }
-                    />
+                      id={workspaceMessageElementId(message.id)}
+                      className={`-mx-3 rounded-2xl p-3 transition-colors duration-700 ${
+                        highlightedMessageId === message.id
+                          ? "bg-[#eef2ff] ring-2 ring-[#c7d2fe]"
+                          : "ring-2 ring-transparent"
+                      }`}
+                    >
+                      <WorkspaceMessage
+                        role="assistant"
+                        model={message.metadata?.model}
+                        timestamp={formatMessageTime(
+                          message.metadata?.createdAt,
+                        )}
+                        isLoading={isLoading}
+                        content={
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {getTextFromMessage(message)}
+                          </ReactMarkdown>
+                        }
+                        messageId={message.id}
+                        isCommentPanelOpen={openCommentMessageId === message.id}
+                        onClickComments={() =>
+                          toggleCommentPanel({
+                            messageId: message.id,
+                            answerSummary: getTextFromMessage(message),
+                          })
+                        }
+                      />
+                    </div>
                   );
                 }
 
@@ -307,6 +436,21 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
                   />
                 );
               })}
+
+              {/* AI가 아직 답변을 다 쓰지 않아서 DB에 없는, 다른 멤버가 막
+                  보낸 질문을 먼저 보여줍니다 — 실제 메시지가 도착하면 사라져요. */}
+              {pendingRemoteMessages.map((pending, index) => (
+                <WorkspaceMessage
+                  key={`pending-${index}`}
+                  role="member"
+                  author={{
+                    name: pending.authorName,
+                    initial: pending.authorName.slice(-2),
+                  }}
+                  timestamp={formatMessageTime()}
+                  content={pending.content}
+                />
+              ))}
             </div>
             <div ref={scrollRef} />
           </div>

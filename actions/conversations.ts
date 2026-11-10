@@ -6,13 +6,41 @@ import db from "@/db";
 import { revalidatePath } from "next/cache";
 import { BASE_URL, CHAT_ROUTES, WORKSPACE_ROUTES } from "@/constants/routes";
 import { eq } from "drizzle-orm";
-import { getConversationById } from "@/data/conversation";
+import { getConversationById, getMessagesByConversation } from "@/data/conversation";
 import { getWorkspaceMembership } from "@/data/workspace";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
+import pusherServer from "@/lib/pusher";
+import { PUSHER_EVENTS, workspaceConversationChannel } from "@/constants/pusher";
 
 export const getConversation = async (id: string) => {
   return getConversationById(id);
+};
+
+// 워크스페이스 공유 대화에서 다른 멤버가 보낸 메시지를 폴링으로 가져오는 용도.
+// (실시간 push는 아니지만, 이 프로젝트엔 아직 웹소켓/SSE 같은 실시간 인프라가
+// 없어서 react-query의 refetchInterval로 주기적으로 다시 읽어오는 방식을 썼습니다.)
+export const getConversationMessages = async (id: string) => {
+  await verifySession();
+  return getMessagesByConversation(id);
+};
+
+// 사용자가 질문을 보낸 "즉시" 호출합니다 — AI 응답이 다 끝나야 addMessage로
+// 저장/발행되는 new-message와 달리, DB엔 아무것도 쓰지 않고 그냥 "질문이
+// 왔다"는 신호만 먼저 다른 멤버들에게 쏴줍니다. 그래서 다른 멤버 화면엔
+// AI가 답변을 다 쓰기 전에도 질문이 바로 보여요. (실패해도 치명적이지
+// 않아서 호출하는 쪽에서 await 없이 fire-and-forget으로 써도 됩니다.)
+export const notifyPendingMessage = async (
+  conversationId: string,
+  content: string,
+) => {
+  const session = await verifySession();
+
+  await pusherServer.trigger(
+    workspaceConversationChannel(conversationId),
+    PUSHER_EVENTS.PENDING_MESSAGE,
+    { authorId: session.id, authorName: session.name, content },
+  );
 };
 
 // workspaceId를 넘기면 팀 공유 대화 경로(/w/[workspaceId]/c/[id])를,
@@ -22,21 +50,42 @@ const getConversationPath = (conversationId: string, workspaceId?: string) =>
     ? WORKSPACE_ROUTES.CONVERSATION(workspaceId, conversationId)
     : `${CHAT_ROUTES.CONVERSATIONS}/${conversationId}`;
 
+// id를 넘기면 그 값으로 저장합니다 — Chat.tsx가 useChat에 생성된(UUID) 메시지
+// id를 그대로 넘겨서, 코멘트가 참조하는 messageId가 스트리밍 중에 보던 메시지와
+// 새로고침 후에도 항상 같은 값이 되도록 맞춥니다.
 export const addMessage = async (
   conversationId: string,
   content: string,
   role: "user" | "assistant",
   model?: string,
   workspaceId?: string,
+  id?: string,
 ) => {
+  // user 메시지의 작성자는 클라이언트가 보낸 값이 아니라 항상 세션에서
+  // 직접 구해요 — 다른 사람 행세로 메시지를 남길 수 없게 하기 위함입니다.
+  const session = await verifySession();
+
   await db.insert(message).values({
+    ...(id ? { id } : {}),
     conversationId,
     content,
     role,
     model: role === "assistant" ? model : undefined,
+    userId: role === "user" ? session.id : undefined,
   });
 
   revalidatePath(getConversationPath(conversationId, workspaceId));
+
+  // 워크스페이스 공유 대화일 때만 — 다른 멤버가 보고 있는 화면에 새
+  // 메시지가 생겼다고 알려줍니다. 내용은 안 담고, 받는 쪽이 그냥 다시
+  // 읽어오게(react-query invalidate) 하는 신호용이라 가볍습니다.
+  if (workspaceId) {
+    await pusherServer.trigger(
+      workspaceConversationChannel(conversationId),
+      PUSHER_EVENTS.NEW_MESSAGE,
+      {},
+    );
+  }
 };
 
 // 대화방의 가장 최근 assistant 메시지를 새 내용으로 덮어씁니다 ("다시 생성" 용도).
@@ -60,6 +109,14 @@ export const updateLastAssistantMessage = async (
     .where(eq(message.id, latest.id));
 
   revalidatePath(getConversationPath(conversationId, workspaceId));
+
+  if (workspaceId) {
+    await pusherServer.trigger(
+      workspaceConversationChannel(conversationId),
+      PUSHER_EVENTS.NEW_MESSAGE,
+      {},
+    );
+  }
 };
 
 export const createConversationWithMessage = async (content: string) => {
@@ -79,6 +136,7 @@ export const createConversationWithMessage = async (content: string) => {
     conversationId: newConversation.id,
     content,
     role: "user",
+    userId: session.id,
   });
 
   revalidatePath(BASE_URL);
@@ -111,6 +169,7 @@ export const createWorkspaceConversationWithMessage = async (
     conversationId: newConversation.id,
     content,
     role: "user",
+    userId: session.id,
   });
 
   revalidatePath(BASE_URL);
