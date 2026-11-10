@@ -3,9 +3,12 @@
 import { ReactNode } from "react";
 import { Copy, MessageSquare } from "lucide-react";
 import toast from "react-hot-toast";
+import { useQuery } from "@tanstack/react-query";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Button } from "../ui/button";
-import { AI_MODEL } from "@/constants/chat";
+import { AI_MODEL, WORKSPACE_POLL_INTERVAL } from "@/constants/chat";
+import { getMessageComments } from "@/actions/workspaceComments";
+import { cn } from "cn";
 
 export type WorkspaceMessageAuthor = {
   name: string;
@@ -23,12 +26,16 @@ type Props =
     }
   | {
       role: "assistant";
+      // 코멘트 조회/작성 대상 식별용 — DB에 저장된 메시지 id와 항상 같은 값이에요
+      // (Chat.tsx가 useChat에 uuid generateId를 넘겨서 보장합니다).
+      messageId: string;
       timestamp: string;
       model?: string;
       content: ReactNode;
-      commentCount?: number;
-      commenters?: WorkspaceMessageAuthor[];
       onClickComments?: () => void;
+      // 이 메시지의 코멘트 패널이 현재 열려있는지 — 열려있으면 버튼을
+      // primary 색으로 강조해서 "지금 보고 있는 패널"임을 표시합니다.
+      isCommentPanelOpen?: boolean;
       isLoading?: boolean;
     };
 
@@ -41,17 +48,36 @@ const ACTION_BUTTON_CLASS =
   "bg-[#f8fafc] text-[#64748b] px-2.5 py-1 rounded-md flex items-center gap-x-1.5 text-xs hover:bg-[#e0e2e5]";
 
 const WorkspaceMessage = (props: Props) => {
+  const isAssistant = props.role === "assistant";
+  const messageId = isAssistant ? props.messageId : undefined;
+  const isAssistantLoading = isAssistant ? (props.isLoading ?? false) : false;
+
+  // role에 따라 훅 호출 여부가 달라지면 안 되니, early return 전에
+  // 무조건 호출하고 enabled로 활성화 여부만 제어합니다. 스트리밍 중인
+  // 메시지는 아직 DB에 저장되지 않아서 조회해봐도 항상 없음(에러)이라,
+  // 로딩이 끝난 뒤에만 조회합니다.
+  const { data: comments = [] } = useQuery({
+    queryKey: ["workspace-comments", messageId],
+    queryFn: () => getMessageComments(messageId!),
+    enabled: isAssistant && !isAssistantLoading,
+    refetchInterval: WORKSPACE_POLL_INTERVAL,
+  });
+
   if (props.role === "assistant") {
     const {
       timestamp,
       model,
       content,
-      commentCount = 0,
-      commenters = [],
       onClickComments,
-      isLoading = false,
+      isCommentPanelOpen = false,
     } = props;
+    const isLoading = isAssistantLoading;
+
+    const commentCount = comments.length;
     const hasComments = commentCount > 0;
+    const commenters: WorkspaceMessageAuthor[] = Array.from(
+      new Map(comments.map((c) => [c.author.name, c.author])).values(),
+    );
 
     return (
       <div className="flex gap-x-3">
@@ -106,33 +132,30 @@ const WorkspaceMessage = (props: Props) => {
               내용 복사
             </Button>
 
-            {hasComments ? (
-              <Button
-                className="flex items-center gap-x-1.5 rounded-md bg-[#e0e7ff] px-2.5 py-1 text-xs text-[#3730a3] hover:bg-[#e0e7ff]/80"
-                onClick={onClickComments}
-              >
-                <MessageSquare className="size-2.5" />
-                코멘트 ({commentCount})
-                <div className="flex -space-x-1.5 pl-0.5">
-                  {commenters.slice(0, 3).map((commenter, index) => (
-                    <Avatar
-                      key={commenter.name + index}
-                      size="sm"
-                      className="bg-[#e0e7ff] ring-2 ring-white"
-                    >
-                      <AvatarFallback className="bg-inherit text-[9px] font-semibold text-[#6366f1]">
-                        {commenter.initial}
-                      </AvatarFallback>
-                    </Avatar>
-                  ))}
-                </div>
-              </Button>
-            ) : (
-              <Button className={ACTION_BUTTON_CLASS} onClick={onClickComments}>
-                <MessageSquare className="size-2.5" />
-                코멘트 남기기
-              </Button>
-            )}
+            <Button
+              className={cn(
+                "flex items-center gap-x-1.5 rounded-md px-2.5 py-1 text-xs",
+                isCommentPanelOpen
+                  ? "bg-[#6366f1] text-white"
+                  : "bg-[#f8fafc] text-[#3730a3] hover:bg-[#e0e7ff]/80",
+              )}
+              onClick={onClickComments}
+            >
+              <MessageSquare className="size-2.5" />
+              {hasComments ? `코멘트 (${commentCount})` : "코멘트 남기기"}
+              <div className="flex -space-x-1.5 pl-0.5">
+                {commenters.slice(0, 3).map((commenter, index) => (
+                  <Avatar
+                    key={commenter.name + index}
+                    className="bg-[#e0e7ff] size-5 ring-1 ring-white"
+                  >
+                    <AvatarFallback className="bg-inherit text-[8px] font-semibold text-[#464554]">
+                      {commenter.initial}
+                    </AvatarFallback>
+                  </Avatar>
+                ))}
+              </div>
+            </Button>
           </div>
         </div>
       </div>
@@ -152,7 +175,7 @@ const WorkspaceMessage = (props: Props) => {
             <div className="space-x-2 text-xs">
               <span className="text-[#64748b]">{timestamp}</span>
               <span className="font-medium text-[#0f172a]">
-                {author.name}
+                {author.name} (나)
               </span>
             </div>
           </div>
@@ -175,8 +198,8 @@ const WorkspaceMessage = (props: Props) => {
   // 초대 멤버 아바타(연한 인디고)와 동일한 톤을 가져와 "나"와 구분되게 했습니다.
   return (
     <div className="flex gap-x-3">
-      <Avatar className="mt-5 bg-[#e0e7ff]">
-        <AvatarFallback className="bg-inherit text-xs font-semibold text-[#6366f1]">
+      <Avatar className="mt-5 bg-[#c9e6ff]">
+        <AvatarFallback className="bg-inherit text-xs text-[#464554]">
           {author.initial}
         </AvatarFallback>
       </Avatar>
@@ -187,7 +210,7 @@ const WorkspaceMessage = (props: Props) => {
           <span className="text-[#64748b]">{timestamp}</span>
         </div>
 
-        <div className="rounded-2xl rounded-tl-xs bg-[#f1f5f9] p-4 text-sm text-[#0f172a]">
+        <div className="rounded-2xl rounded-tl-xs bg-[#f2f3ff] p-4 text-sm text-[#0f172a]">
           {content}
         </div>
       </div>
@@ -196,30 +219,3 @@ const WorkspaceMessage = (props: Props) => {
 };
 
 export default WorkspaceMessage;
-
-// AI 응답에서 "핵심 N가지" 같은 번호 매긴 요약을 보여줄 때 쓰는 보조 컴포넌트입니다.
-// WorkspaceMessage의 assistant content 자리에 children으로 넣어 사용하세요.
-export const WorkspaceInsightList = ({
-  items,
-}: {
-  items: { title: string; description: string }[];
-}) => (
-  <div className="flex flex-col gap-2">
-    {items.map((item, index) => (
-      <div
-        key={item.title}
-        className="flex gap-2.5 rounded-xl bg-[#f1f5f9] p-3"
-      >
-        <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-[#6366f1]/10 text-[11px] font-bold text-[#6366f1]">
-          {index + 1}
-        </span>
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="text-sm font-semibold text-[#0f172a]">
-            {item.title}
-          </p>
-          <p className="text-sm text-[#64748b]">{item.description}</p>
-        </div>
-      </div>
-    ))}
-  </div>
-);
