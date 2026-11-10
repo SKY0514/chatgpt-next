@@ -1,5 +1,5 @@
 import CreateWorkspaceModal from "@/components/chat/CreateWorkspaceModal";
-import Header from "@/components/chat/Header";
+import HomeLayoutContent from "@/components/chat/HomeLayoutContent";
 import Sidebar from "@/components/chat/Sidebar";
 import UserProvider from "@/providers/UserProvider";
 import { ReactNode } from "react";
@@ -12,14 +12,8 @@ const ChatLayout = ({ children }: { children: ReactNode }) => {
         <div className="hidden md:block w-[288px]">
           <Sidebar />
         </div>
-        {/* 헤더 + chat 영역 */}
-        <div
-          className="flex flex-col flex-1 h-full overflow-y-auto"
-          id="home-layout"
-        >
-          <Header sidebar={<Sidebar />} />
-          {children}
-        </div>
+        {/* 헤더 + chat 영역 (+ 코멘트 패널이 열리면 같이 좁아짐) */}
+        <HomeLayoutContent sidebar={<Sidebar />}>{children}</HomeLayoutContent>
       </div>
       <CreateWorkspaceModal />
     </UserProvider>
