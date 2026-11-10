@@ -14,7 +14,10 @@ import toast from "react-hot-toast";
 import { isEmpty } from "@/utils";
 
 const Header = ({ sidebar }: { sidebar: ReactNode }) => {
-  const { id, workspaceId } = useParams<{ id?: string; workspaceId?: string }>();
+  const { id, workspaceId } = useParams<{
+    id?: string;
+    workspaceId?: string;
+  }>();
   const userName = useUserStore((state) => state.user.name);
   const inputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();

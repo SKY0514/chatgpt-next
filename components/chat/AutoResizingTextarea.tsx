@@ -32,7 +32,7 @@ const AutoResizingTextarea = ({
       ref={textareaRef}
       value={value}
       className={cn(
-        "min-h-15 max-h-30 flex-1 resize-none border-0 text-base! focus-visible:ring-1 focus-visible:ring-black rounded-none px-2 py-1",
+        "min-h-15 max-h-30 flex-1 resize-none border-0 text-base! focus-visible:ring-0 rounded-none px-2 py-1",
         className,
       )}
       {...rest}
