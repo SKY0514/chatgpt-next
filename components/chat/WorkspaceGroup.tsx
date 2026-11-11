@@ -9,10 +9,12 @@ import { useWorkspaceGroupStore } from "@/stores/workspaceGroup";
 import { useUserStore } from "@/stores/user";
 import { useModalStore } from "@/stores/modal";
 import ModalFooter from "../modal/ModalFooter";
-import { useOptimistic, useTransition } from "react";
+import { useEffect, useOptimistic, useTransition } from "react";
 import { deleteConversation } from "@/actions/conversations";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import pusherClient from "@/lib/pusherClient";
+import { PUSHER_EVENTS, workspaceChannel } from "@/constants/pusher";
 
 type Props = {
   workspace: {
@@ -58,6 +60,25 @@ const WorkspaceGroup = ({ workspace, conversations }: Props) => {
     (state, deletedId: string) => state.filter((item) => item.id !== deletedId),
   );
 
+  // 이 워크스페이스의 대화방이 다른 멤버에 의해 생성/삭제/제목변경되면,
+  // 지금 그 대화방 페이지를 보고 있지 않아도(사이드바만 봐도) 알 수
+  // 있게 합니다. 신호만 받고 router.refresh()로 서버 데이터(conversations
+  // prop의 출처인 Sidebar.tsx)를 다시 가져옵니다.
+  useEffect(() => {
+    const channel = pusherClient.subscribe(workspaceChannel(workspace.id));
+
+    channel.bind(PUSHER_EVENTS.WORKSPACE_UPDATED, () => {
+      router.refresh();
+    });
+
+    return () => {
+      // 재구독 시 이전 바인딩이 남아 이벤트가 중복 발생하는 걸 막기 위해
+      // 채널을 끊기 전에 바인딩을 먼저 전부 지웁니다.
+      channel.unbind_all();
+      pusherClient.unsubscribe(workspaceChannel(workspace.id));
+    };
+  }, [workspace.id, router]);
+
   const handleClickDeleteButton = (id: string) => {
     openModal({
       title: "정말 삭제하시겠습니까?",
@@ -76,7 +97,10 @@ const WorkspaceGroup = ({ workspace, conversations }: Props) => {
     startDeleteTransition(async () => {
       removeOptimisticList(id);
       try {
-        await deleteConversation(id);
+        // 이 socketId를 넘기면 내 탭에는 conversation-deleted 알림이 다시
+        // 안 와요 — 내가 지운 거니까 "삭제에 성공했습니다"면 충분합니다.
+        // (아직 Pusher 연결이 안 됐으면 빈 문자열일 수 있어 그때는 안 넘겨요.)
+        await deleteConversation(id, pusherClient.connection.socket_id || undefined);
 
         if (conversationId === id) {
           router.replace(WORKSPACE_ROUTES.NEW(workspace.id));
