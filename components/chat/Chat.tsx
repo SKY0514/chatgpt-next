@@ -5,7 +5,7 @@ import Message from "./Message";
 import WorkspaceMessage from "./WorkspaceMessage";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { useModelStore } from "@/stores/model";
 import {
@@ -83,6 +83,104 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
   const storeModel = useModelStore((state) => state.model);
   const storeUser = useUserStore((state) => state.user);
 
+  // 대화 도중 다른 멤버가 이 대화방을 삭제했을 때 — Pusher 이벤트(즉시)와
+  // 메시지 저장 실패(안전망) 양쪽에서 같은 방식으로 내보냅니다. useCallback으로
+  // 감싸서 아래 Pusher 구독 effect가 매 렌더마다 재구독하지 않게 합니다.
+  const handleConversationDeleted = useCallback(() => {
+    toast.error("대화방이 삭제되었습니다.");
+    if (!workspaceId) return;
+    router.push(WORKSPACE_ROUTES.NEW(workspaceId));
+    // push만 하면 사이드바(Sidebar.tsx, 서버 컴포넌트)가 라우터 캐시에 남은
+    // 이전 목록을 그대로 보여줄 수 있어서, refresh로 서버 데이터를 다시
+    // 가져오게 합니다 — 지운 사람 화면에선 바로 빠지는데 나는 안 빠지던
+    // 문제가 이것 때문이었어요.
+    router.refresh();
+  }, [workspaceId, router]);
+
+  const handleFinishedMessage = async (
+    message: ChatUIMessage,
+    finishedMessages: UIMessage[],
+  ) => {
+    if (!id) return;
+
+    const assistantContent = getTextFromMessage(message);
+
+    const maybeGenerateWorkspaceTitle = async (
+      finishedMessages: UIMessage[],
+      assistantContent: string,
+    ) => {
+      if (!isNewWorkspaceConversationRef.current || !id) return;
+      isNewWorkspaceConversationRef.current = false;
+
+      const lastUserMessage = [...finishedMessages]
+        .reverse()
+        .find((m) => m.role === "user");
+      const userContent = lastUserMessage
+        ? getTextFromMessage(lastUserMessage)
+        : "";
+
+      await generateWorkspaceConversationTitle(
+        id,
+        userContent,
+        assistantContent,
+        storeModel,
+        // isNewWorkspaceConversationRef는 workspaceId가 있을 때만 true로
+        // 설정돼요(아래 useEffect 참고) — 이 분기에 왔다면 항상 존재합니다.
+        workspaceId!,
+      );
+      queryClient.invalidateQueries({ queryKey: ["conversation", id] });
+    };
+
+    if (isRegeneratingRef.current) {
+      isRegeneratingRef.current = false;
+      await updateLastAssistantMessage(
+        id,
+        assistantContent,
+        storeModel,
+        workspaceId,
+      );
+      return;
+    }
+
+    if (isContinuingPendingReplyRef.current) {
+      isContinuingPendingReplyRef.current = false;
+      await addMessage(
+        id,
+        assistantContent,
+        "assistant",
+        storeModel,
+        workspaceId,
+        message.id,
+      );
+      await maybeGenerateWorkspaceTitle(finishedMessages, assistantContent);
+      return;
+    }
+
+    const lastUserMessage = [...finishedMessages]
+      .reverse()
+      .find((m) => m.role === "user");
+    const userContent = lastUserMessage
+      ? getTextFromMessage(lastUserMessage)
+      : "";
+
+    await addMessage(
+      id,
+      userContent,
+      "user",
+      undefined,
+      workspaceId,
+      lastUserMessage?.id,
+    );
+    await addMessage(
+      id,
+      assistantContent,
+      "assistant",
+      storeModel,
+      workspaceId,
+      message.id,
+    );
+  };
+
   const { messages, sendMessage, regenerate, status, setMessages } = useChat<ChatUIMessage>({
     messages: initialMessages,
     // 메시지 id를 DB에도 그대로 저장할 수 있는 형식(uuid)으로 맞춥니다 —
@@ -92,79 +190,19 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
     onFinish: async ({ message, messages: finishedMessages }) => {
       if (!id) return;
 
-      const assistantContent = getTextFromMessage(message);
-
-      const maybeGenerateWorkspaceTitle = async (
-        finishedMessages: UIMessage[],
-        assistantContent: string,
-      ) => {
-        if (!isNewWorkspaceConversationRef.current || !id) return;
-        isNewWorkspaceConversationRef.current = false;
-
-        const lastUserMessage = [...finishedMessages]
-          .reverse()
-          .find((m) => m.role === "user");
-        const userContent = lastUserMessage
-          ? getTextFromMessage(lastUserMessage)
-          : "";
-
-        await generateWorkspaceConversationTitle(
-          id,
-          userContent,
-          assistantContent,
-          storeModel,
-        );
-        queryClient.invalidateQueries({ queryKey: ["conversation", id] });
-      };
-
-      if (isRegeneratingRef.current) {
-        isRegeneratingRef.current = false;
-        await updateLastAssistantMessage(
-          id,
-          assistantContent,
-          storeModel,
-          workspaceId,
-        );
-        return;
+      try {
+        await handleFinishedMessage(message, finishedMessages);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "대화방이 삭제되었습니다."
+        ) {
+          handleConversationDeleted();
+          return;
+        }
+        console.error("error:", error);
+        toast.error("메시지 저장에 실패하였습니다.");
       }
-
-      if (isContinuingPendingReplyRef.current) {
-        isContinuingPendingReplyRef.current = false;
-        await addMessage(
-          id,
-          assistantContent,
-          "assistant",
-          storeModel,
-          workspaceId,
-          message.id,
-        );
-        await maybeGenerateWorkspaceTitle(finishedMessages, assistantContent);
-        return;
-      }
-
-      const lastUserMessage = [...finishedMessages]
-        .reverse()
-        .find((m) => m.role === "user");
-      const userContent = lastUserMessage
-        ? getTextFromMessage(lastUserMessage)
-        : "";
-
-      await addMessage(
-        id,
-        userContent,
-        "user",
-        undefined,
-        workspaceId,
-        lastUserMessage?.id,
-      );
-      await addMessage(
-        id,
-        assistantContent,
-        "assistant",
-        storeModel,
-        workspaceId,
-        message.id,
-      );
     },
   });
 
@@ -200,6 +238,22 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
     });
   }, [remoteMessages, setMessages]);
 
+  // storeUser.id는 마운트 직후 ""에서 실제 값으로 한 번 바뀌고,
+  // handleConversationDeleted도 참조가 바뀔 수 있어요 — 이걸 그대로
+  // effect의 deps에 넣으면 그때마다 구독을 끊고 다시 맺는데, pusher-js가
+  // 그 사이에 이전 바인딩을 완전히 정리하지 못해 이벤트가 두 번씩
+  // 들어오는 문제가 있었습니다. ref로 최신값만 읽도록 바꿔서, 이 대화방에
+  // 들어온 뒤로는 구독을 딱 한 번만 맺습니다.
+  const storeUserIdRef = useRef(storeUser.id);
+  useEffect(() => {
+    storeUserIdRef.current = storeUser.id;
+  }, [storeUser.id]);
+
+  const handleConversationDeletedRef = useRef(handleConversationDeleted);
+  useEffect(() => {
+    handleConversationDeletedRef.current = handleConversationDeleted;
+  }, [handleConversationDeleted]);
+
   // Pusher로 "이 대화방에 새 메시지/코멘트가 생겼다"는 신호를 받으면, 위
   // 폴링 쿼리와 코멘트 쿼리를 즉시 다시 읽어오게 합니다. 폴링의 refetchInterval은
   // 이 이벤트를 놓쳤을 때를 대비한 느슨한 안전망으로만 남겨뒀어요.
@@ -222,15 +276,22 @@ const Chat = ({ initialMessages, workspaceId, workspaceName }: Props) => {
       PUSHER_EVENTS.PENDING_MESSAGE,
       (data: { authorId: string; authorName: string; content: string }) => {
         // 내가 보낸 메시지는 이미 내 화면에 바로 보이니 중복으로 또 띄우지 않습니다.
-        if (data.authorId === storeUser.id) return;
+        if (data.authorId === storeUserIdRef.current) return;
         setPendingRemoteMessages((prev) => [...prev, data]);
       },
     );
+    // 다른 멤버가 이 대화방을 삭제했을 때 — 새로고침 없이 바로 내보냅니다.
+    channel.bind(PUSHER_EVENTS.CONVERSATION_DELETED, () => {
+      handleConversationDeletedRef.current();
+    });
 
     return () => {
+      // 혹시라도 구독 해제 전에 바인딩이 그대로 남아있을 가능성을 없애기
+      // 위해, 채널을 끊기 전에 이 채널에 걸어둔 바인딩을 먼저 전부 지웁니다.
+      channel.unbind_all();
       pusherClient.unsubscribe(workspaceConversationChannel(id));
     };
-  }, [workspaceId, id, queryClient, storeUser.id]);
+  }, [workspaceId, id, queryClient]);
 
   const isBusy =
     isCreatingConversation || status === "submitted" || status === "streaming";

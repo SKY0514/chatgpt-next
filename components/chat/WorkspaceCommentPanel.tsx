@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { ArrowUp, MessageSquareText, MessagesSquare, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useParams, useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import { Textarea } from "../ui/textarea";
 import {
@@ -12,6 +13,7 @@ import {
 } from "@/actions/workspaceComments";
 import { formatMessageTime } from "@/utils";
 import { WORKSPACE_POLL_INTERVAL } from "@/constants/chat";
+import { WORKSPACE_ROUTES } from "@/constants/routes";
 
 type Props = {
   messageId: string;
@@ -31,6 +33,8 @@ const WorkspaceCommentPanel = ({
   const [inputValue, setInputValue] = useState("");
   const [isPending, startTransition] = useTransition();
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
 
   // WorkspaceMessage.tsx의 코멘트 버튼과 같은 쿼리키를 써서, 코멘트를
   // 남기면 버튼의 코멘트 수도 자동으로 같이 갱신됩니다.
@@ -52,6 +56,20 @@ const WorkspaceCommentPanel = ({
           queryKey: ["workspace-comments", messageId],
         });
       } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "대화방이 삭제되었습니다."
+        ) {
+          toast.error(error.message);
+          onClose?.();
+          if (workspaceId) {
+            router.push(WORKSPACE_ROUTES.NEW(workspaceId));
+            // 사이드바(서버 컴포넌트)가 라우터 캐시의 이전 목록을 보여줄 수
+            // 있어서, 서버 데이터를 다시 가져오게 강제합니다.
+            router.refresh();
+          }
+          return;
+        }
         console.error("error:", error);
         toast.error("코멘트 등록에 실패하였습니다.");
       }

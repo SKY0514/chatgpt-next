@@ -24,7 +24,14 @@ const assertCommentableMessage = async (messageId: string) => {
     with: { conversation: true },
   });
 
-  if (!target?.conversation?.workspaceId) {
+  // 메시지 자체가 없으면(대화방이 삭제돼 cascade로 함께 지워진 경우 포함)
+  // "워크스페이스 메시지가 아니다"와는 다른 원인이라 구분해서 던집니다 —
+  // 클라이언트가 이 경우만 알럿+리다이렉트로 다르게 처리할 수 있게요.
+  if (!target) {
+    throw new Error("대화방이 삭제되었습니다.");
+  }
+
+  if (!target.conversation?.workspaceId) {
     throw new Error("워크스페이스 대화의 메시지에만 코멘트를 남길 수 있습니다.");
   }
 

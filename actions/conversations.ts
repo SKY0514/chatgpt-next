@@ -11,10 +11,25 @@ import { getWorkspaceMembership } from "@/data/workspace";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import pusherServer from "@/lib/pusher";
-import { PUSHER_EVENTS, workspaceConversationChannel } from "@/constants/pusher";
+import {
+  PUSHER_EVENTS,
+  workspaceChannel,
+  workspaceConversationChannel,
+} from "@/constants/pusher";
 
 export const getConversation = async (id: string) => {
   return getConversationById(id);
+};
+
+// 특정 대화방 페이지를 안 보고 있어도(사이드바만 보고 있어도) 대화방
+// 생성/삭제/제목 변경을 알 수 있게, 워크스페이스 단위 채널로도 신호를
+// 쏩니다. 사이드바는 받으면 그냥 router.refresh()로 전체를 다시 읽어요.
+const notifyWorkspaceUpdated = async (workspaceId: string) => {
+  await pusherServer.trigger(
+    workspaceChannel(workspaceId),
+    PUSHER_EVENTS.WORKSPACE_UPDATED,
+    {},
+  );
 };
 
 // 워크스페이스 공유 대화에서 다른 멤버가 보낸 메시지를 폴링으로 가져오는 용도.
@@ -64,6 +79,16 @@ export const addMessage = async (
   // user 메시지의 작성자는 클라이언트가 보낸 값이 아니라 항상 세션에서
   // 직접 구해요 — 다른 사람 행세로 메시지를 남길 수 없게 하기 위함입니다.
   const session = await verifySession();
+
+  // 대화 중간에 다른 멤버가 이 대화방을 삭제했을 수 있어요 — Pusher로
+  // 즉시 내보내는 게 기본이지만, 이벤트를 놓쳤을 때를 대비한 안전망으로
+  // 메시지를 저장하기 직전에 한 번 더 확인합니다.
+  const target = await db.query.conversation.findFirst({
+    where: { id: conversationId },
+  });
+  if (!target) {
+    throw new Error("대화방이 삭제되었습니다.");
+  }
 
   await db.insert(message).values({
     ...(id ? { id } : {}),
@@ -174,6 +199,7 @@ export const createWorkspaceConversationWithMessage = async (
 
   revalidatePath(BASE_URL);
   revalidatePath(WORKSPACE_ROUTES.CONVERSATION(workspaceId, newConversation.id));
+  await notifyWorkspaceUpdated(workspaceId);
 
   return newConversation;
 };
@@ -187,6 +213,7 @@ export const generateWorkspaceConversationTitle = async (
   userContent: string,
   assistantContent: string,
   model: string,
+  workspaceId: string,
 ) => {
   await verifySession();
 
@@ -211,6 +238,7 @@ export const generateWorkspaceConversationTitle = async (
     .where(eq(conversation.id, conversationId));
 
   revalidatePath(BASE_URL);
+  await notifyWorkspaceUpdated(workspaceId);
 };
 
 // 이름 변경/삭제 권한 규칙:
@@ -233,7 +261,7 @@ const assertCanManageConversation = async (conversationId: string) => {
     if (target.userId !== session.id) {
       throw new Error("본인이 만든 대화만 수정/삭제할 수 있습니다.");
     }
-    return;
+    return target;
   }
 
   const membership = await getWorkspaceMembership(target.workspaceId);
@@ -243,10 +271,12 @@ const assertCanManageConversation = async (conversationId: string) => {
   if (!isOwner && !isCreator) {
     throw new Error("이 대화를 수정/삭제할 권한이 없습니다.");
   }
+
+  return target;
 };
 
 export const updateConversation = async (id: string, name: string) => {
-  await assertCanManageConversation(id);
+  const target = await assertCanManageConversation(id);
 
   await db
     .update(conversation)
@@ -254,11 +284,32 @@ export const updateConversation = async (id: string, name: string) => {
     .where(eq(conversation.id, id));
 
   revalidatePath(BASE_URL);
+
+  if (target.workspaceId) {
+    await notifyWorkspaceUpdated(target.workspaceId);
+  }
 };
 
-export const deleteConversation = async (id: string) => {
-  await assertCanManageConversation(id);
+// socketId: 삭제를 요청한 브라우저 탭의 Pusher 연결 id(선택). 넘기면 그
+// 탭에는 이벤트를 다시 보내지 않아요 — 삭제한 사람은 이미 자기 액션의
+// 성공 토스트를 보니까, 같은 대화방을 보고 있었다면 "대화방이
+// 삭제되었습니다" 알림까지 중복으로 뜰 필요가 없습니다.
+export const deleteConversation = async (id: string, socketId?: string) => {
+  const target = await assertCanManageConversation(id);
 
   await db.delete(conversation).where(eq(conversation.id, id));
   revalidatePath(BASE_URL);
+
+  if (target.workspaceId) {
+    // 지금 이 대화방을 보고 있는 다른 멤버를 새로고침 없이 바로 내보냅니다.
+    await pusherServer.trigger(
+      workspaceConversationChannel(id),
+      PUSHER_EVENTS.CONVERSATION_DELETED,
+      {},
+      socketId ? { socket_id: socketId } : undefined,
+    );
+    // 그 대화방 페이지를 안 보고 있던 멤버(사이드바만 보고 있던 사람)도
+    // 목록에서 바로 사라지게 합니다.
+    await notifyWorkspaceUpdated(target.workspaceId);
+  }
 };
