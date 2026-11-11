@@ -35,18 +35,20 @@ export const getConversationsByWorkspace = async (workspaceId: string) => {
 };
 
 // /w/[workspaceId]/c/[id] 페이지 진입 시 사용: 멤버십 + 해당 대화가 실제로
-// 이 워크스페이스 소속인지를 함께 확인합니다. 멤버가 아니거나, 대화가 다른
-// 워크스페이스(또는 개인) 소유면 null을 반환합니다 — 호출부에서 notFound() 처리하세요.
+// 이 워크스페이스 소속인지를 함께 확인합니다. 멤버가 아니면 "not-member"
+// (호출부에서 notFound() 처리), 멤버인데 대화가 없으면(삭제됨 등) "not-found"
+// (호출부에서 안내 화면 처리)를 반환합니다 — 두 원인을 구분해야 전자는
+// 404로, 후자는 "대화방이 삭제됐어요" 안내로 다르게 보여줄 수 있어요.
 export const getWorkspaceConversation = async (
   workspaceId: string,
   conversationId: string,
 ) => {
   const membership = await getWorkspaceMembership(workspaceId);
-  if (!membership) return null;
+  if (!membership) return "not-member" as const;
 
   const conversation = await db.query.conversation.findFirst({
     where: { id: conversationId, workspaceId },
   });
 
-  return conversation ?? null;
+  return conversation ?? ("not-found" as const);
 };
